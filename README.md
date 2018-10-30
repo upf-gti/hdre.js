@@ -33,4 +33,4 @@ The maximum size of a texture stored in HDRE is 512x512 pixels. Each level of bl
 
 All pixels data is stored as Float32Arrays using the level order.
 
-![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/levels.PNG/)
+![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/levels.PNG)
