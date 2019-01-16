@@ -17,9 +17,11 @@
 
     var HDRE = global.HDRE = {
 
-        version: 1.2,
-        maxFileSize: 58000 // KBs
+        version: 1.3,
+        maxFileSize: 58000 // KBytes
     };
+
+	// En la v1.4 poner maxFileSize a 58 000 000 (bytes)
     
     HDRE.setup = function(o)
     {
@@ -32,14 +34,15 @@
     // Float32Array -> Float32 -> 32 bits per element -> 4 bytes
     // Float64Array -> Float64 -> 64 bits per element -> 8 bytes
     
-    /** HEADER STRUCTURE (164 bytes)
+    /** HEADER STRUCTURE (128 bytes)
      * Header signature ("HDRE" in ASCII)       4 bytes
      * Format Version                           4 bytes
      * Width                                    2 bytes
      * Height                                   2 bytes
-     * Max file size                            2 bytes
+     * Max file size                            4 bytes
      * Number of channels                       1 byte
      * Bits per channel                         1 byte
+	 * Header size		                        1 byte
      * Flags                                    1 byte
      */
     
@@ -60,7 +63,7 @@
         // File format information
         var numFaces = 6;
         var numChannels = 4;
-        var headerSize = 164; // Bytes
+        var headerSize = 128; // Bytes (128 in v1.3)
         var contentSize = size * numFaces * numChannels * FLO2BYTE; // Bytes
         var fileSize = headerSize + contentSize; // Bytes
         var bpChannel = 32; // Bits
@@ -89,6 +92,7 @@
         // Set rest of the bytes
         view.setUint8(15, numChannels); // Number of channels
         view.setUint8(16, bpChannel); // Bits per channel
+		view.setUint8(17, headerSize); // max header size
 
         // Set flags
         // ...
@@ -119,7 +123,10 @@
             offset += (s * numFaces);
         }
 
-        offset = 164;
+		var maxValue = getFloat32Max( data );
+		view.setFloat32(18, maxValue); // set max value for luminance
+
+        offset = headerSize;
 
         // Set data into the content buffer
         for(var i = 0; i < data.length; i++)
@@ -131,6 +138,10 @@
         // Return the ArrayBuffer with the content created
         return contentBuffer;
     }
+
+	function getFloat32Max(data) {
+	  return data.reduce((max, p) => p > max ? p : max, data[0]);
+	}
 
     /**
     * Read file
@@ -158,14 +169,14 @@
         throw( "No data buffer" );
 
         var options = options || {};
-        var fileSizeInKB = buffer.byteLength / 1e3;
+        var fileSizeInKBytes = buffer.byteLength / 1e3;
 
         /*
         *   Read header
         */
 
         // Read signature
-        var s = parseString( buffer, 0 );
+        var sg = parseString( buffer, 0 );
 
         // Read version
         var v = parseFloat32(buffer, 5);
@@ -175,28 +186,41 @@
         var h = parseUint16(buffer, 11);
         var m = parseUint16(buffer, 13);
 
-        if(fileSizeInKB > m)
-        throw('file not accepted: too big');
+		console.log(m, fileSizeInKBytes);
 
         // Set rest of the bytes
         var c = parseUint8(buffer, 15);
         var b = parseUint8(buffer, 16);
+		var s = parseUint8(buffer, 17);
+		var i = parseFloat(parseFloat32(buffer, 18));
 
         var header = {
-            signature: s,
+			headerSize: s,
+            signature: sg,
             version: v,
             width: w,
             height: h,
             max_size: m,
             nChannels: c,
-            bpChannel: b
+            bpChannel: b,
+			maxIrradiance: i,
         };
+
+		console.table(header);
+
+		if(fileSizeInKBytes > m)
+        throw('file not accepted: too big');
 
         /*
         *   Read data
         */
+		
 
-        var dataBuffer = buffer.slice(164);
+		if(!s){ // previous versions
+			s = 164;
+		}
+
+        var dataBuffer = buffer.slice(s);
         var data = new Float32Array(dataBuffer);
         var numChannels = c;
 
@@ -211,7 +235,8 @@
         {
             ems.push( data.slice(offset, offset + (w*w*numChannels*6)) );
             offset += (w*w*numChannels*6);
-            if(v == 1.0)
+			// only v1.0 has first level as big as original em
+			if(v == 1.0)
                 w /= (i == 0) ? 1 : 2;
             else
                 w /= 2;
@@ -262,6 +287,7 @@
             });
 
             // resize next textures
+			// only v1.0 has first level as big as original em
             if(v == 1.0)
                 w /= (i == 0) ? 1 : 2;
             else
