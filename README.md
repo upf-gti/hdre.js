@@ -8,7 +8,7 @@ Binary file containing the information of a cubemap environment and its **5 leve
 
 ### Header
 
-Size: ```164 bytes```
+Size: ```128 bytes```
 
  * Header signature ("HDRE" in ASCII)       ```4 bytes```
  * Format Version                           ```4 bytes```
@@ -28,6 +28,8 @@ The maximum size of a texture stored in HDRE is 512x512 pixels. Each level of bl
 * 2: 64x64
 * 3: 32x32
 * 4: 16x16
+
+Note: Faces stored individually removing empty spaces. 
 
 #### Content
 
