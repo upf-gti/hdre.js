@@ -186,7 +186,7 @@
         var h = parseUint16(buffer, 11);
         var m = parseUint16(buffer, 13);
 
-		console.log(m, fileSizeInKBytes);
+		//console.log(m, fileSizeInKBytes);
 
         // Set rest of the bytes
         var c = parseUint8(buffer, 15);
@@ -206,7 +206,8 @@
 			maxIrradiance: i,
         };
 
-		console.table(header);
+//		console.table(header);
+		window.parsedFile = {buffer: buffer, header: header};
 
 		if(fileSizeInKBytes > m)
         throw('file not accepted: too big');
