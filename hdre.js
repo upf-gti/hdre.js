@@ -14,6 +14,11 @@
      */
     
     var FLO2BYTE = 4;
+	var BYTE2BITS = 8;
+
+	var U_BYTE		= 01;
+	var HALF_FLOAT	= 02;
+	var FLOAT		= 03;
 
     var HDRE = global.HDRE = {
 
@@ -49,13 +54,19 @@
     /**
     * Write and download an HDRE
     * @method write
-    * @param {Object} package
+    * @param {Object} package - [lvl0: { w, h, pixeldata: [faces] }, lvl1: ...]
     * @param {Number} width
     * @param {Number} height
-    * @param {Number} size buffer size
+    * @param {Number} buffer size
+    * @param {Object} options
     */
-    HDRE.write = function( package, width, height, size )
+    HDRE.write = function( package, width, height, size, options )
     {
+
+		options = options || {};
+
+		var array_type = options.type ? options.type : Float32Array;
+
         /*
         *   Create header
         */
@@ -64,9 +75,9 @@
         var numFaces = 6;
         var numChannels = 4;
         var headerSize = 128; // Bytes (128 in v1.3)
-        var contentSize = size * numFaces * numChannels * FLO2BYTE; // Bytes
+        var contentSize = size * numFaces * numChannels * array_type.BYTES_PER_ELEMENT; // Bytes
         var fileSize = headerSize + contentSize; // Bytes
-        var bpChannel = 32; // Bits
+        var bpChannel = array_type.BYTES_PER_ELEMENT * BYTE2BITS; // Bits
 
         var contentBuffer = new ArrayBuffer(fileSize);
         var view = new DataView(contentBuffer);
@@ -101,7 +112,7 @@
         *   Create data
         */
         
-        var data = new Float32Array(size * numFaces * numChannels);
+        var data = new array_type(size * numFaces * numChannels);
         var offset = 0;
 
         for(var i = 0; i < package.length; i++)
@@ -123,16 +134,33 @@
             offset += (s * numFaces);
         }
 
+		// set max value for luminance
 		var maxValue = getFloat32Max( data );
-		view.setFloat32(18, maxValue); // set max value for luminance
+		view.setFloat32(18, maxValue); 
+
+		var type = FLOAT;
+		if( array_type == Uint8Array)
+			type = U_BYTE;
+		
+		// set write array type 
+		view.setUint16(22, type); 
+
+		/*
+		*  END OF HEADER
+		*/
 
         offset = headerSize;
 
         // Set data into the content buffer
         for(var i = 0; i < data.length; i++)
         {
-            view.setFloat32(offset, data[i], true);
-            offset += 4;
+			if(type == U_BYTE) {
+	            view.setUint8(offset, data[i], true);
+			}else if(type == FLOAT) {
+	            view.setFloat32(offset, data[i], true);
+			}
+
+            offset += array_type.BYTES_PER_ELEMENT;
         }
 
         // Return the ArrayBuffer with the content created
@@ -193,11 +221,13 @@
         var b = parseUint8(buffer, 16);
 		var s = parseUint8(buffer, 17);
 		var i = parseFloat(parseFloat32(buffer, 18));
+		var a = parseUint16(buffer, 22);
 
         var header = {
-			headerSize: s,
-            signature: sg,
             version: v,
+            signature: sg,
+			headerSize: s,
+			array_type: a,
             width: w,
             height: h,
             max_size: m,
@@ -213,7 +243,7 @@
         throw('file not accepted: too big');
 
         /*
-        *   Read data
+        *   BEGIN READING DATA (Uint8 or Float32)
         */
 		
 
@@ -222,7 +252,9 @@
 		}
 
         var dataBuffer = buffer.slice(s);
-        var data = new Float32Array(dataBuffer);
+
+		var array_type = (a == U_BYTE) ? Uint8Array : Float32Array;
+        var data = new array_type(dataBuffer);
         var numChannels = c;
 
         var begin = 0, 
@@ -236,6 +268,7 @@
         {
             ems.push( data.slice(offset, offset + (w*w*numChannels*6)) );
             offset += (w*w*numChannels*6);
+
 			// only v1.0 has first level as big as original em
 			if(v == 1.0)
                 w /= (i == 0) ? 1 : 2;
@@ -262,7 +295,7 @@
 
             for(var j = 0; j < 6; j++)
             {
-                faces[j] = new Float32Array(bPerFace);
+                faces[j] = new array_type(bPerFace);
 
                 var subdata = bytes.slice(offset, offset + (numChannels * w * w));
                 faces[j].set(subdata);
