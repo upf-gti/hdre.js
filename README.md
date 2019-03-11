@@ -43,7 +43,7 @@ Note: Faces stored individually removing empty spaces present in cubemap mapping
 To write an HDRE file, call the following HDRE method:
 
 ```
-HDRE.write( data, width, height, totalSize, options )
+HDRE.write( data, width, height, options )
 ```
 
 where:
@@ -61,8 +61,7 @@ where:
 
 * ```width``` is the width of the original environment
 * ```height``` is the height of the original environment
-* ```totalSize``` is the accumulated size of the file
-* ```options``` 
+* ```options``` (store as uint8array, uint16array or float32array)
 
 ![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/Untitled-2.jpg)
 ![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/qud.jpg)
