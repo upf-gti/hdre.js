@@ -65,6 +65,4 @@ where:
 * ```options``` 
 
 ![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/Untitled-2.jpg)
-![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/0020.jpg)
-![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/0020b.jpg)
-![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/0020bb.jpg)
+![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/qud.jpg)
