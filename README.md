@@ -48,7 +48,7 @@ HDRE.write( data, width, height, options )
 
 where:
 
-* data is the pixel data of each face per mipmap level:
+* ```data``` is the pixel data of each face per mipmap level:
 
   ```
   var data = [
@@ -61,7 +61,14 @@ where:
 
 * ```width``` is the width of the original environment
 * ```height``` is the height of the original environment
-* ```options``` (store as uint8array, uint16array or float32array)
+* ```options``` (storage type)
+
+  ```
+  var options = {
+    array: Uint8Array, // Uint8Array, Uint16Array, Float32Array
+    format: "rgbe" // null in other case
+  }
+  ```
 
 ![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/Untitled-2.jpg)
 ![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/qud.jpg)
