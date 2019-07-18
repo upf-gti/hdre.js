@@ -23,7 +23,7 @@
 
     var HDRE = global.HDRE = {
 
-        version: 1.3,
+        version: 1.5, // v.1.5 adds spherical harmonics coeffs for the skybox
         maxFileSize: 58000 // KBytes
     };
 
@@ -112,9 +112,6 @@
         view.setUint8(16, bpChannel); // Bits per channel
 		view.setUint8(17, headerSize); // max header size
 
-        // Set flags
-        // ...
-
         /*
         *   Create data
         */
@@ -155,6 +152,22 @@
             
 		// set write array type 
 		view.setUint16(22, type); 
+
+		// SH COEFFS
+		if(options.sh) {
+		
+			var SH = options.sh;
+
+			view.setUint8(24, 1);
+			view.setUint8(25, SH.length / 3); // number of coeffs
+			var pos = 26;
+			for(var i = 0; i < SH.length; i++) {
+				view.setFloat32(pos, SH[i]); 
+				pos += 4;
+			}
+		}
+		else
+			view.setUint8(24, 0);
 
 		/*
 		*  END OF HEADER
@@ -236,6 +249,21 @@
 		var i = parseFloat(parseFloat32(buffer, 18));
 		var a = parseUint16(buffer, 22);
 
+		var shs = null;
+		var hasSH = parseUint8(buffer, 24);
+
+		if(hasSH) {
+		
+			var Ncoeffs = parseUint8(buffer, 25) * 3;
+			shs = [];
+			var pos = 26;
+
+			for(var i = 0; i < Ncoeffs; i++)  {
+				shs.push( parseFloat(parseFloat32(buffer, pos)) );
+				pos += 4;
+			}
+		}
+
         var header = {
             version: v,
             signature: sg,
@@ -247,13 +275,18 @@
             nChannels: c,
             bpChannel: b,
 			maxIrradiance: i,
+			shs: shs
         };
 
-//		console.table(header);
+		console.table(header);
         window.parsedFile = {buffer: buffer, header: header};
         
-		if(fileSizeInKBytes > m)
-        throw('file not accepted: too big');
+		/*if(fileSizeInKBytes > m)
+        throw('file not accepted: too big');*/
+
+
+		// 
+
 
         /*
         *   BEGIN READING DATA (Uint8 or Float32)
