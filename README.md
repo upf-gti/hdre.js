@@ -1,8 +1,8 @@
-# HDRE file format
+# HDRE: HDR file format for 3D environments
 
 ## Description
 
-Binary file containing the information of a cubemap environment and the computed mipmapped versions needed in Photo Realistic Rendering (PBR) to simulate different materials.   
+A **HDRE** is a binary file containing the information of a cubemap environment and some of the computed mipmapped versions needed in Photorealistic Rendering (PBR) to simulate different materials (Prefiltering steps).  It also contains other information as the values for the spherical harmonics (since v1.5) or the maximum luminance.
 
 ## Structure
 
@@ -11,7 +11,7 @@ Binary file containing the information of a cubemap environment and the computed
 HDRE information. Default size: ```128 bytes```.
 
  * Header signature ("HDRE")                ```4 bytes```
- * Format Version                           ```4 bytes```
+ * Version                                  ```4 bytes```
  * Width                                    ```2 bytes```
  * Height                                   ```2 bytes```
  * Max file size                            ```2 bytes```
@@ -20,21 +20,21 @@ HDRE information. Default size: ```128 bytes```.
  * Header size                              ```1 byte```
  * ...
  * Maximum luminance                        ```4 bytes```
- * Data type (8,16,32 bits)                 ```2 bytes```
- * Flags                                    ```1 byte```
+ * Data type (UInt, Half Float, Float)      ```2 bytes```
+ * Values for Spherical Harmonics (9 coef) 
 
 ### Pixel data
 
-The maximum size of a texture stored in HDRE is 512x512 pixels. Each mipmap level is stored using half the size of the previous level. In case of a 512x512 float environment (32.76MBs):
+The maximum size of a texture stored in HDRE is 512x512 pixels **per face**. Each prefiltered level is stored using half the size of the previous one. In the case of a 512 HDRE (32.76MBs):
 
-* 0: 512x512
-* 1: 256x256
-* 2: 128x128
-* 3: 64x64
-* 4: 32x32
-* 5: 16x16
+* EP0: 512x512
+* EP1: 256x256
+* EP2: 128x128
+* EP3: 64x64
+* EP4: 32x32
+* EP5: 16x16
 
-Note: Faces stored individually removing empty spaces present in cubemap mapping. 
+Note: Faces are stored individually, removing existing empty spaces when using cubemaps. 
 
 ## Use
 
@@ -61,12 +61,32 @@ where:
 
 * ```width``` is the width of the original environment
 * ```height``` is the height of the original environment
-* ```options``` (storage type)
+* ```options```
 
   ```
   var options = {
     array: Uint8Array, // Uint8Array, Uint16Array, Float32Array
-    format: "rgbe" // null in other case
+    format: "rgbe" // null in other case,
+    sh: sh_values // coefficients for spherical harmonics in case of having them
+  }
+  ```
+  
+  ### Parse (Read)
+
+To parse a HDRE, call the following method and it will return the data divided in **pixel data** and **header**.
+
+```
+HDRE.parse( buffer, options )
+```
+
+where:
+
+* ```buffer``` is the arraybuffer readed
+* ```options```
+
+  ```
+  var options = {
+    onprogress: function(e){  } // callback method for following the parse progress
   }
   ```
 
