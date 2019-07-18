@@ -71,7 +71,7 @@ where:
   }
   ```
   
-  ### Parse (Read)
+### Parse (Read)
 
 To parse a HDRE, call the following method and it will return the data divided in **pixel data** and **header**.
 
@@ -81,7 +81,7 @@ HDRE.parse( buffer, options )
 
 where:
 
-* ```buffer``` is the arraybuffer readed
+* ```buffer``` is the arraybuffer returned by the request
 * ```options```
 
   ```
