@@ -39,59 +39,5 @@ The maximum size of a texture stored in HDRE is 256x256 pixels **per face**. Eac
 
 Note: Faces are stored individually, removing empty spaces when using cubemaps. 
 
-## Use
-
-### Write
-
-To write an HDRE file, call the following HDRE method:
-
-```
-HDRE.write( data, width, height, options )
-```
-
-where:
-
-* ```data``` is the pixel data of each face per mipmap level:
-
-  ```
-  var data = [
-    // for each mipmap 
-    { width: w, height: h, pixelData: [ face1_array, face2_array, ..., face6_array ] },
-    ...
-    { ... }
-  ]
-  ```
-
-* ```width``` is the width of the original environment
-* ```height``` is the height of the original environment
-* ```options```
-
-  ```
-  var options = {
-    array: Uint8Array, // Uint8Array, Uint16Array, Float32Array
-    format: "rgbe" // null in other case,
-    sh: sh_values // coefficients for spherical harmonics in case of having them
-  }
-  ```
-  
-### Parse (Read)
-
-To parse a HDRE, call the following method and it will return the data divided in **pixel data** and **header**.
-
-```
-HDRE.parse( buffer, options )
-```
-
-where:
-
-* ```buffer``` is the arraybuffer returned by the request
-* ```options```
-
-  ```
-  var options = {
-    onprogress: function(e){  } // callback method for following the parse progress
-  }
-  ```
-
 ![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/Untitled-2.jpg)
 ![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/qud.jpg)
