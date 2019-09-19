@@ -4,37 +4,40 @@
 
 A **HDRE** is a binary file containing the information of a cubemap environment and some of the computed mipmapped versions needed in Photorealistic Rendering (PBR) to simulate different materials (Prefiltering steps).  It also contains other information as the values for the spherical harmonics (since v1.5) or the maximum luminance.
 
+Since v2.0 there is an available version for C++ applications. 
+
 ## Structure
 
 ### Header
 
-HDRE information. Default size: ```128 bytes```.
+Contains all the HDRE properties. Default size: ```256 bytes``` [v2.0].
 
  * Header signature ("HDRE")                ```4 bytes```
  * Version                                  ```4 bytes```
  * Width                                    ```2 bytes```
  * Height                                   ```2 bytes```
- * Max file size                            ```2 bytes```
+ * Max file size                            ```4 bytes```
  * Number of channels                       ```1 byte```
  * Bits per channel                         ```1 byte```
  * Header size                              ```1 byte```
+ * Encoding (LE)                            ```1 byte```
  * ...
  * Maximum luminance                        ```4 bytes```
  * Data type (UInt, Half Float, Float)      ```2 bytes```
- * Values for Spherical Harmonics (9 coef) 
+ * Values for Spherical Harmonics (9 coef)  [v2.0]
 
 ### Pixel data
 
-The maximum size of a texture stored in HDRE is 512x512 pixels **per face**. Each prefiltered level is stored using half the size of the previous one. In the case of a 512 HDRE (32.76MBs):
+The maximum size of a texture stored in HDRE is 256x256 pixels **per face**. Each prefiltered level is stored using half the size of the previous with a minimum value of 8x8. In the case of a 256 sized HDRE, the *mipmap* levels would be:
 
-* EP0: 512x512
-* EP1: 256x256
-* EP2: 128x128
-* EP3: 64x64
-* EP4: 32x32
-* EP5: 16x16
+* Mip0: 256x256
+* Mip1: 128x128
+* Mip2: 64x64
+* Mip3: 32x32
+* Mip4: 16x16
+* Mip5: 8x8
 
-Note: Faces are stored individually, removing existing empty spaces when using cubemaps. 
+Note: Faces are stored individually, removing empty spaces when using cubemaps. 
 
 ## Use
 
