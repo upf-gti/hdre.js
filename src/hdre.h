@@ -46,6 +46,7 @@ private:
 	float * faces_array[N_LEVELS];
 
 	sHDREHeader header;
+	bool clean();
 
 public:
 

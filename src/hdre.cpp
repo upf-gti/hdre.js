@@ -8,12 +8,13 @@
 
 HDRE::HDRE(const char* filename)
 {
-	load(filename);
+	if(clean())
+		load(filename);
 }
 
 HDRE::~HDRE()
 {
-	
+	clean();
 }
 
 sHDRELevel HDRE::getLevel(int n)
@@ -130,4 +131,31 @@ bool HDRE::load(const char* filename)
 
 	std::cout << std::endl << " + '" << filename << "' loaded successfully" << std::endl;
 	return true;
+}
+
+bool HDRE::clean()
+{
+	try
+	{
+		delete data;
+
+		for (int i = 0; i < N_LEVELS; i++)
+		{
+			delete faces_array[i];
+
+			for (int j = 0; j < N_FACES; j++)
+			{
+				delete pixels[i][j];
+			}
+		}
+
+		return true;
+	}
+	catch (const std::exception&)
+	{
+		std::cout << std::endl << "Error cleaning" << std::endl;
+		return false;
+	}
+
+	return false;
 }
