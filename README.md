@@ -12,19 +12,20 @@ Since v2.0 there is an available version for C++ applications.
 
 Contains all the HDRE properties. Default size: ```256 bytes``` [v2.0].
 
- * Header signature ("HDRE")                ```4 bytes```
- * Version                                  ```4 bytes```
- * Width                                    ```2 bytes```
- * Height                                   ```2 bytes```
- * Max file size                            ```4 bytes```
- * Number of channels                       ```1 byte```
- * Bits per channel                         ```1 byte```
- * Header size                              ```1 byte```
- * Encoding (LE)                            ```1 byte```
- * ...
- * Maximum luminance                        ```4 bytes```
- * Data type (UInt, Half Float, Float)      ```2 bytes```
- * Values for Spherical Harmonics (9 coef)  [v2.0]
+| Property                  |  Size      |
+| ------------------------- | ---------: |
+| Header signature ("HDRE") |  `4 bytes` |
+| Version                   |  `4 bytes` |
+| Width                     |  `2 bytes` |
+| Height                    |  `2 bytes` |
+| Max file size             |  `4 bytes` |
+| Number of channels        |  `2 bytes` |
+| Bits per channel          |  `2 bytes` |
+| Header size               |  `2 bytes` |
+| Encoding (LE)             |  `2 bytes` |
+| Maximum luminance         |  `4 bytes` |
+| Data type (UInt, Float..) |  `2 bytes` |
+| SH (9 coef) [v2.0]        |            |
 
 ### Pixel data
 
