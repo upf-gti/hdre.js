@@ -40,5 +40,5 @@ The maximum size of a texture stored in HDRE is 256x256 pixels **per face**. Eac
 
 Note: Faces are stored individually, removing empty spaces when using cubemaps. 
 
-![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/Untitled-2.jpg)
+![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/stadium-cubemap.jpg)
 ![HDRE pixel storage](https://webglstudio.org/users/arodriguez/screenshots/qud.jpg)
