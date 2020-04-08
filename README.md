@@ -29,9 +29,9 @@ Contains all the HDRE properties. Default size: ```256 bytes``` [v2.0].
 
 ### Pixel data
 
-The maximum size of a texture stored in HDRE is 256x256 pixels **per face**. Each prefiltered level is stored using half the size of the previous with a minimum value of 8x8. In the case of a 256 sized HDRE, the *mipmap* levels would be:
+The maximum size of a texture stored in HDRE is 256x256 pixels **per face**. Each prefiltered level is stored using half the size of the previous one so it is possible to store them in the mipmaps of the original image. In the case of a 256 sized HDRE, the *mipmap* levels would be:
 
-* Mip0: 256x256
+* Original image: 256x256
 * Mip1: 128x128
 * Mip2: 64x64
 * Mip3: 32x32
