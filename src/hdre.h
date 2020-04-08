@@ -53,6 +53,8 @@ public:
 	int width;
 	int height;
 
+	float version;
+
 	HDRE(const char* filename);
 	~HDRE();
 
