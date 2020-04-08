@@ -6,6 +6,10 @@ A **HDRE** is a binary file containing the information of a cubemap environment 
 
 Since v2.0 there is an available version for C++ applications. 
 
+![Examples irradiance/reflection](https://webglstudio.org/users/arodriguez/screenshots/irradiance_reflection.png)
+
+`PBR` Irradiance and reflection probes rendered using HDRE files
+
 ## Structure
 
 ### Header
