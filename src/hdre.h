@@ -1,4 +1,9 @@
+
 #pragma once
+
+#include <map>
+#include <string>
+#include <cassert>
 
 #define N_LEVELS 6
 #define N_FACES 6
@@ -32,7 +37,7 @@ typedef struct {
 	int width;
 	int height;
 
-	float * data;
+	float* data;
 	float** faces;
 
 } sHDRELevel;
@@ -40,10 +45,10 @@ typedef struct {
 class HDRE {
 
 private:
-	
-	float * data; // only f32 now
-	float * pixels[N_LEVELS][N_FACES]; // Xpos, Xneg, Ypos, Yneg, Zpos, Zneg
-	float * faces_array[N_LEVELS];
+
+	float* data; // only f32 now
+	float* pixels[N_LEVELS][N_FACES]; // Xpos, Xneg, Ypos, Yneg, Zpos, Zneg
+	float* faces_array[N_LEVELS];
 
 	sHDREHeader header;
 	bool clean();
@@ -55,14 +60,20 @@ public:
 
 	float version;
 
-	HDRE(const char* filename);
+	HDRE();
 	~HDRE();
+
+	// class manager
+	static std::map<std::string, HDRE*> sHDRELoaded;
 
 	bool load(const char* filename);
 
+	static HDRE* Get(const char* filename);
+	void setName(const char* name) { sHDRELoaded[name] = this; }
+
 	// useful methods
 	float getMaxLuminance() { return this->header.maxLuminance; };
-	float* getSHCoeffs() { if(this->header.numCoeffs > 0) return this->header.coeffs; }
+	float* getSHCoeffs() { if (this->header.numCoeffs > 0) return this->header.coeffs; return nullptr; }
 
 	float* getData(); // All pixel data
 	float* getFace(int level, int face);	// Specific level and face
@@ -70,4 +81,3 @@ public:
 
 	sHDRELevel getLevel(int level = 0);
 };
-

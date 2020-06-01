@@ -6,10 +6,11 @@
 
 #include "hdre.h"
 
-HDRE::HDRE(const char* filename)
+std::map<std::string, HDRE*> HDRE::sHDRELoaded;
+
+HDRE::HDRE()
 {
-	if(clean())
-		load(filename);
+	
 }
 
 HDRE::~HDRE()
@@ -49,6 +50,24 @@ float** HDRE::getFaces(int level)
 	return this->pixels[level];
 }
 
+HDRE* HDRE::Get(const char* filename)
+{
+	assert(filename);
+
+	auto it = sHDRELoaded.find(filename);
+	if (it != sHDRELoaded.end())
+		return it->second;
+
+	HDRE* hdre = new HDRE();
+	if (!hdre->load(filename))
+	{
+		delete hdre;
+		return NULL;
+	}
+
+	return hdre;
+}
+
 bool HDRE::load(const char* filename)
 {
 	FILE *f;
@@ -66,6 +85,7 @@ bool HDRE::load(const char* filename)
 		throw("ArrayType not supported. Please export in Float32Array.");
 
 	this->header = HDREHeader;
+	this->version = HDREHeader.version;
 
 	int width = HDREHeader.width;
 	int height = HDREHeader.height;
@@ -134,6 +154,7 @@ bool HDRE::load(const char* filename)
 
 		// update level offset
 		mapOffset += mapSize;
+
 		// reassign width for next level
 		w = std::max(8, (int)(width / pow(2.0, mip_level)));
 
@@ -147,6 +168,9 @@ bool HDRE::load(const char* filename)
 
 bool HDRE::clean()
 {
+	if (!data)
+		return false;
+
 	try
 	{
 		delete data;
