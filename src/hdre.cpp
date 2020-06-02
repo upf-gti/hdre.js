@@ -87,11 +87,19 @@ bool HDRE::load(const char* filename)
 	this->header = HDREHeader;
 	this->version = HDREHeader.version;
 
-	int width = HDREHeader.width;
-	int height = HDREHeader.height;
+	this->numChannels = HDREHeader.numChannels;
+	this->bitsPerChannel = HDREHeader.bitsPerChannel;
+	this->maxLuminance = HDREHeader.maxLuminance;
+	this->type = HDREHeader.type;
 
-	this->width = width;
-	this->height = height;
+	if (HDREHeader.includesSH)
+	{
+		this->numCoeffs = HDREHeader.numCoeffs;
+		this->coeffs = HDREHeader.coeffs;
+	}
+
+	int width = this->width = HDREHeader.width;
+	int height = this->height = HDREHeader.height;
 
 	int dataSize = 0;
 	int w = width;

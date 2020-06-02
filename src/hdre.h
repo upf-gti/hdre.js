@@ -59,6 +59,13 @@ public:
 	int height;
 
 	float version;
+	short numChannels;
+	short bitsPerChannel;
+	float maxLuminance;
+
+	short type;
+	float numCoeffs;
+	float* coeffs;
 
 	HDRE();
 	~HDRE();
@@ -73,7 +80,7 @@ public:
 
 	// useful methods
 	float getMaxLuminance() { return this->header.maxLuminance; };
-	float* getSHCoeffs() { if (this->header.numCoeffs > 0) return this->header.coeffs; return nullptr; }
+	//float* getSHCoeffs() { if (this->numCoeffs > 0) return this->header.coeffs; return nullptr; }
 
 	float* getData(); // All pixel data
 	float* getFace(int level, int face);	// Specific level and face
