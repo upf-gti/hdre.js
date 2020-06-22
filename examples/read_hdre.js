@@ -1,5 +1,5 @@
 
-function read__HDRE(buffer)
+function read__HDRE(buffer, flipY)
 {
 	var r = HDRE.parse(buffer);
 
@@ -8,73 +8,54 @@ function read__HDRE(buffer)
 
 	var environments = r._envs;
 	var header = r.header;
-	var textures = [];
 
-	// Create GPU Textures
-	for(var i = 0; i < environments.length; i++)
+	var type = GL.FLOAT;			// FLOAT
+
+	if(header.array_type == 01)		// UBYTE
+		type = GL.UNSIGNED_BYTE;
+	if(header.array_type == 02)		// HALF FLOAT
+		type = GL.HALF_FLOAT_OES;
+	if(header.array_type == 04)		// RGBE
+		type = GL.UNSIGNED_BYTE;
+
+	// Create original environment texture
+
+	var options = {
+		format: header.nChannels === 4 ? gl.RGBA : gl.RGB,
+		type: type,
+		minFilter: gl.LINEAR_MIPMAP_LINEAR,
+		texture_type: GL.TEXTURE_CUBE_MAP,
+		pixel_data: _envs[0].data
+	};
+
+	// Flip if necessary
+	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flipY );
+
+	let tex = new GL.Texture( _envs[0].width, _envs[0].width, options);
+	tex.mipmap_data = {};
+	
+	// Generate mipmap chain
+	tex.bind(0);
+	gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+	tex.unbind();
+
+	// Upload the rest of the info to mipmap storage
+	// For each environment
+	for(var i = 1; i < 6; i++)
 	{
-		var type = GL.FLOAT;			// FLOAT
+		var pixels =  _envs[i].data;
+		
+		// For each face
+		for(var f = 0; f < 6; ++f)
+			tex.uploadData( pixels[f], { no_flip: true, cubemap_face: f, mipmap_level: i}, true );
 
-		var data = environments[i].data;
-		var width = environments[i].width;
-		var height = environments[i].height;
-
-		if(header.array_type == 01)		// UBYTE
-			type = GL.UNSIGNED_BYTE;
-		if(header.array_type == 02)		// HALF FLOAT
-			type = GL.HALF_FLOAT_OES;
-		if(header.array_type == 04)		// RGBE
-			type = GL.UNSIGNED_BYTE;
-
-		var options = {
-			format: gl.RGBA,
-			type: type,
-			minFilter: gl.LINEAR_MIPMAP_LINEAR,
-			texture_type: GL.TEXTURE_CUBE_MAP,
-			pixel_data: data
-		};
-
-		textures.push( new Texture( width, height, options) );
+		tex.mipmap_data[i] = pixels;
 	}
 
-	// Store specular reflection (mip 0)
-	gl.textures[tex_name] = textures[0];
+	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !flipY );
 
-	// Store the rest of levels
-	for(var i = 1; i < 6; i++)
-		gl.textures["@mip" + i + "__" + tex_name] = textures[i];
+	tex.has_mipmaps = true;
+	tex.data = null;
 
 	return true;
-}
-
-function write__HDRE = function( cube_tex, options )
-{
-	var width = texture.width;
-	var height = texture.height;
-	
-	var originalSkybox = this.processSkybox( temp ? temp : texture, isRGBE );
-	var data = [];
-
-	/*
-		Get all mip levels from current cube_tex
-		and store them so data ends up as:
-
-		var data = [
-		  // for each mip level
-		  { width: w, height: h, pixelData: [ face1_array, face2_array, ..., face6_array ] },
-		  .
-		  .
-		  .
-		  { ... }
-		]
-	*/ 
-
-
-	var write_options = {
-		type: arrayType, 
-		rgbe: isRGBE,
-		sh: spherical_harminics_coeffs // If available (as float array[27])
-	}
-
-	var buffer = HDRE.write( data, width, height, write_options );
 }
