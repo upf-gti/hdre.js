@@ -10,6 +10,8 @@ Since v2.0 there is an available version for C++ applications.
 
 `PBR` Irradiance and reflection probes rendered using HDRE files
 
+To create images you must use the [HDRETool](https://webglstudio.org/projects/hdr4eu/latest/) or download them from the [HDRERepository](https://webglstudio.org/projects/hdr4eu/repository/).
+
 ## Structure
 
 ### Header
