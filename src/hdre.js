@@ -237,13 +237,26 @@
     * @method read
     * @param {String} file 
     */
-    HDRE.read = function( file )
+    HDRE.load = function( url, callback )
     {
         var xhr = new XMLHttpRequest();
         xhr.responseType = "arraybuffer";
-        xhr.open( "GET", file, true );
-        xhr.onload = (e) => { if(e.target.status != 404) parse(e.target.response) };
+        xhr.open( "GET", url, true );
+        xhr.onload = (e) => {
+		if(e.target.status == 404)
+			return;
+		var data = parse(e.target.response);
+		if(callback)
+			callback(data);
+    	}
         xhr.send();
+    }
+	
+    //legacy
+    HDRE.read = function( url, callback )
+    {
+       console.warn("Legacy function, use HDRE.load instead of HDRE.read");
+       return HDRE.load( url, callback );
     }
 
     /**
@@ -255,11 +268,11 @@
     HDRE.parse = function( buffer, options )
     {
         if(!buffer)
-        throw( "No data buffer" );
+            throw( "No data buffer" );
 
         var options = options || {};
         var fileSizeInBytes = buffer.byteLength;
-		var LE = true;
+	var LE = true;
 
         /*
         *   Read header
@@ -316,18 +329,17 @@
 			encoding: isLE
         };
 
-		// console.table(header);
-        window.parsedFile = {buffer: buffer, header: header};
+	// console.table(header);
+        window.parsedFile = HDRE.last_parsed_file = { buffer: buffer, header: header };
         
-		if(v < 2 || v > 1e3){ // bad encoding
-			console.error('old version, please update the HDRE');
-			return false;
-		}
-
-		if(fileSizeInBytes > m){
-			console.error('file too big');
-			return false;
-		}
+	if(v < 2 || v > 1e3){ // bad encoding
+		console.error('old version, please update the HDRE');
+		return false;
+	}
+	if(fileSizeInBytes > m){
+		console.error('file too big');
+		return false;
+	}
 
 
         /*
@@ -344,17 +356,17 @@
             array_type = Uint16Array;
 
 
-		var dataSize = dataBuffer.byteLength / 4;
-		var data = new array_type(dataSize);
-		var view = new DataView(dataBuffer);
+	var dataSize = dataBuffer.byteLength / 4;
+	var data = new array_type(dataSize);
+	var view = new DataView(dataBuffer);
 	
-		var pos = 0;
+	var pos = 0;
 
-		for(var i = 0 ; i < dataSize; i++)
-		{
-			data[i] = view.getFloat32(pos, LE);
-			pos += 4;
-		}
+	for(var i = 0 ; i < dataSize; i++)
+	{
+		data[i] = view.getFloat32(pos, LE);
+		pos += 4;
+	}
 
         var numChannels = c;
 
@@ -368,16 +380,16 @@
 
         for(var i = 0; i < 6; i++)
         {
-			var mip_level = i + 1;
+		var mip_level = i + 1;
 
-			var offsetEnd = w * w * numChannels * 6;
-            ems.push( data.slice(offset, offset + offsetEnd) );
-            offset += offsetEnd;
+		var offsetEnd = w * w * numChannels * 6;
+            	ems.push( data.slice(offset, offset + offsetEnd) );
+            	offset += offsetEnd;
             
-            if(v > 2.0)
-                w = originalWidth / Math.pow(2, mip_level);
-            else
-                w = Math.max(8, originalWidth / Math.pow(2, mip_level));
+            	if(v > 2.0)
+                	w = originalWidth / Math.pow(2, mip_level);
+	        else
+        	        w = Math.max(8, originalWidth / Math.pow(2, mip_level));
         }
 
 
@@ -427,14 +439,13 @@
 
         // return 6 images: original env + 5 levels of roughness
         // pass this to a GL.Texture
-        return {header: header, _envs: precomputed};
+        return { header: header, _envs: precomputed };
     }
 
     /* 
         Private library methods
     */
-
-	   function parseSignature( buffer, offset ) {
+    function parseSignature( buffer, offset ) {
 
         var uintBuffer = new Uint8Array( buffer );
         var endOffset = 4;
