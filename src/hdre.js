@@ -439,40 +439,40 @@
 		return { header: header, _envs: precomputed };
 	}
 
-    HDRE.toTexture = function( data, tex_name, onprogress )
-    {
+	HDRE.toTexture = function( data, tex_name, onprogress )
+	{
 		if(!window.GL)
 			throw("this function requires to use litegl.js");
-        var onprogress = onprogress || this.default_progress;
+		var onprogress = onprogress || this.default_progress;
 		var r = null;
 		if(data.constructor === ArrayBuffer)
-	        r = HDRE.parse(buffer, { onprogress: onprogress });
+			r = HDRE.parse(buffer, { onprogress: onprogress });
 		else
 			r = data;
 
 		if(!r)
 			return false;
 
-        var _envs = r._envs;
-        var header = r.header;
-        var textures = [];
+		var _envs = r._envs;
+		var header = r.header;
+		var textures = [];
 
-        var version = header.version;
+		var version = header.version;
 
-        // Get base enviroment texture
-        var type = GL.FLOAT;
-        var data = _envs[0].data;
+		// Get base enviroment texture
+		var type = GL.FLOAT;
+		var data = _envs[0].data;
 		var is_rgbe = false;
 		var flip_Y_sides = true;
 
-        if(header.array_type == 01) // UBYTE
-            type = GL.UNSIGNED_BYTE;
-        else if(header.array_type == 02) // HALF FLOAT
-            type = GL.HALF_FLOAT_OES;
-        else if(header.array_type == 04) { // RGBE
-            type = GL.UNSIGNED_BYTE;
+		if(header.array_type == 01) // UBYTE
+			type = GL.UNSIGNED_BYTE;
+		else if(header.array_type == 02) // HALF FLOAT
+			type = GL.HALF_FLOAT_OES;
+		else if(header.array_type == 04) { // RGBE
+			type = GL.UNSIGNED_BYTE;
 			is_rgbe = true;
-        }
+		}
 
 		if(flip_Y_sides)
 		{
@@ -481,50 +481,69 @@
 			data[3] = tmp;
 		}
 
-        var options = {
-            format: header.nChannels === 4 ? gl.RGBA : gl.RGB,
-            type: type,
-            minFilter: gl.LINEAR_MIPMAP_LINEAR,
-            texture_type: GL.TEXTURE_CUBE_MAP,
-            pixel_data: data,
+		var options = {
+			format: header.nChannels === 4 ? gl.RGBA : gl.RGB,
+			type: type,
+			minFilter: gl.LINEAR_MIPMAP_LINEAR,
+			texture_type: GL.TEXTURE_CUBE_MAP,
+			//pixel_data: data,
 			no_flip: !flip_Y_sides
-        };
+		};
 
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flip_Y_sides );
-        var tex = new GL.Texture( _envs[0].width, _envs[0].width, options);
-        tex.mipmap_data = {};
-        
-        // Generate mipmap
-        tex.bind(0);
-        gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
-        tex.unbind();
+		var w = _envs[0].width;
 
-        // Upload prefilter mipmaps
-        for(var i = 1; i < 6; i++){
+		//gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flip_Y_sides );
+		GL.Texture.disable_deprecated = true;
 
-            var pixels =  _envs[i].data;
+		var tex = new GL.Texture( w, w, options );
+		tex.mipmap_data = {};
 
-			if(flip_Y_sides)
+		// Generate mipmaps
+		tex.bind(0);
+
+		var num_mipmaps = Math.log(w) / Math.log(2);
+
+		// Upload prefilter mipmaps
+		for(var i = 0; i <= num_mipmaps; i++)
+		{
+			var level_info = _envs[i];
+			var levelsize = Math.pow(2,num_mipmaps - i);
+
+			if(level_info)
 			{
-				var tmp = pixels[2];
-				pixels[2] = pixels[3];
-				pixels[3] = tmp;
+				var pixels = level_info.data;
+				if(flip_Y_sides && i > 0)
+				{
+					var tmp = pixels[2];
+					pixels[2] = pixels[3];
+					pixels[3] = tmp;
+				}
+				for(var f = 0; f < 6; ++f)
+				{
+					//if(flip_Y_sides && i > 0)
+					//	GL.Texture.flipYData( pixels[f], levelsize, levelsize, header.nChannels );
+					tex.uploadData( pixels[f], { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
+				}
+				tex.mipmap_data[i] = pixels;
 			}
+			else
+			{
+				var zero = new Float32Array(levelsize * levelsize * header.nChannels);
+				for(var f = 0; f < 6; ++f)
+					tex.uploadData( zero, { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
+			}
+		}
 
-            for(var f = 0; f < 6; ++f)
-                tex.uploadData( pixels[f], { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
-            tex.mipmap_data[i] = pixels;
-        }
-        
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true );
+		//gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true );
+		GL.Texture.disable_deprecated = false;
 
-        // Store the texture 
-        tex.has_mipmaps = true;
-        tex.data = null;
+		// Store the texture 
+		tex.has_mipmaps = true;
+		tex.data = null;
 		tex.is_rgbe = is_rgbe;
 
 		return tex;
-    }
+	}
 
 	/* 
 		Private library methods

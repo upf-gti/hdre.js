@@ -1,0 +1,290 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+
+<title>rendeer.js: PBR example</title>
+	<style type='text/css'>
+		html, body { width: 100%; height: 100%; margin: 0; padding: 0 }
+	</style>
+	<script type="text/javascript" src="libs/gl-matrix-min.js"></script>
+	<script type="text/javascript" src="libs/litegl.js"></script>
+	<script type="text/javascript" src="libs/rendeer.js"></script>
+	<script type="text/javascript" src="../../src/hdre.js"></script>
+	<script type="text/javascript">
+
+	var renderer = null;
+	var camera = null;
+	var scene = null;
+
+	var coeffs = new Float32Array(9*3);
+	coeffs[0] = 1.0;
+	
+	function init()
+	{
+		//create a scene
+		scene = new RD.Scene();
+
+		//create the rendering context
+		var context = GL.create({width: window.innerWidth, height:window.innerHeight});
+		renderer = new RD.Renderer(context);
+		document.body.appendChild(renderer.canvas); //attach
+
+		//create camera
+		camera = new RD.Camera();
+		camera.perspective( 45, gl.canvas.width / gl.canvas.height, 0.1, 1000 );
+		camera.lookAt( [0,0,5],[0,0,0],[0,1,0] );
+
+		HDRE.load("../panorama.hdre", function(data){
+			var tex = HDRE.toTexture(data);
+			gl.textures["environment"] = tex;
+		});
+
+		var envnode = new RD.SceneNode();
+		envnode.mesh = "sphere";
+		envnode.textures.color = "environment";
+		envnode.shader = "environment";
+		scene.root.addChild(envnode);
+
+		var shnode = new RD.SceneNode();
+		shnode.position = [1.75,0,0];
+		shnode.scaling = 0.5;
+		shnode.mesh = "sphere";
+		shnode.shader = "shs";
+		shnode.uniforms.u_sh_coeffs = coeffs;
+		scene.root.addChild(shnode);
+
+		var refnode = new RD.SceneNode();
+		refnode.position = [-1.75,0,0];
+		refnode.scaling = 0.5;
+		refnode.mesh = "sphere";
+		refnode.shader = "reflection";
+		scene.root.addChild(refnode);
+
+		var vertex_shader = this._vertex_shader = '\
+			precision highp float;\n\
+			attribute vec3 a_vertex;\n\
+			attribute vec3 a_normal;\n\
+			varying vec3 v_pos;\n\
+			varying vec3 v_normal;\n\
+			uniform mat4 u_model;\n\
+			uniform mat4 u_viewprojection;\n\
+			void main() {\n\
+				v_pos = (u_model * vec4(a_vertex,1.0)).xyz;\n\
+				v_normal = (u_model * vec4(a_normal,0.0)).xyz;\n\
+				gl_Position = u_viewprojection * vec4( v_pos , 1.0 );\n\
+			}\
+		';
+
+		//Show environment and its mipmaps
+		var skybox_fragment_shader = '\
+			#extension GL_EXT_shader_texture_lod : enable\n\
+			precision highp float;\n\
+			varying vec3 v_normal;\n\
+			uniform samplerCube u_color_texture;\n\
+			uniform float u_level;\n\
+			void main() {\n\
+				vec3 N = normalize( v_normal );\n\
+				gl_FragColor = textureCubeLodEXT( u_color_texture, N, u_level );\n\
+			}\
+		';
+
+		//Show reflection
+		var reflection_fragment_shader = '\
+			#extension GL_EXT_shader_texture_lod : enable\n\
+			precision highp float;\n\
+			varying vec3 v_normal;\n\
+			varying vec3 v_pos;\n\
+			uniform samplerCube u_color_texture;\n\
+			uniform float u_level;\n\
+			uniform vec3 u_camera_position;\n\
+			void main() {\n\
+				vec3 N = normalize( v_normal );\n\
+				vec3 E = normalize(v_pos - u_camera_position);\n\
+				vec3 R = reflect( E, N );\n\
+				gl_FragColor = textureCubeLodEXT( u_color_texture, R, u_level );\n\
+			}\
+		';
+
+		//Show SHs
+		var sh_fragment_shader = '\
+			precision highp float;\n\
+			varying vec3 v_normal;\n\
+			uniform vec3 u_sh_coeffs[9];\n\
+			\n\
+			const float Pi = 3.141592654;\n\
+			const float CosineA0 = Pi;\n\
+			const float CosineA1 = (2.0 * Pi) / 3.0;\n\
+			const float CosineA2 = Pi * 0.25;\n\
+			\n\
+			struct SH9 { float c[9]; };\n\
+			struct SH9Color { vec3 c[9]; };\n\
+			\n\
+			void SHCosineLobe(in vec3 dir, out SH9 sh)\n\
+			{\n\
+				// Band 0\n\
+				sh.c[0] = 0.282095 * CosineA0;\n\
+				\n\
+				// Band 1\n\
+				sh.c[1] = 0.488603 * dir.y * CosineA1;\n\
+				sh.c[2] = 0.488603 * dir.z * CosineA1;\n\
+				sh.c[3] = 0.488603 * dir.x * CosineA1;\n\
+				\n\
+				sh.c[4] = 1.092548 * dir.x * dir.y * CosineA2;\n\
+				sh.c[5] = 1.092548 * dir.y * dir.z * CosineA2;\n\
+				sh.c[6] = 0.315392 * (3.0 * dir.z * dir.z - 1.0) * CosineA2;\n\
+				sh.c[7] = 1.092548 * dir.x * dir.z * CosineA2;\n\
+				sh.c[8] = 0.546274 * (dir.x * dir.x - dir.y * dir.y) * CosineA2;\n\
+			}\n\
+			\n\
+			vec3 ComputeSHDiffuse(in vec3 normal, in SH9Color radiance)\n\
+			{\n\
+				// Compute the cosine lobe in SH, oriented about the normal direction\n\
+				SH9 shCosine;\n\
+				SHCosineLobe(normal, shCosine);\n\
+				\n\
+				// Compute the SH dot product to get irradiance\n\
+				vec3 irradiance = vec3(0.0);\n\
+				const int num = 9;\n\
+				for(int i = 0; i < num; ++i)\n\
+					irradiance += radiance.c[i] * shCosine.c[i];\n\
+				\n\
+				vec3 shDiffuse = irradiance * (1.0 / Pi);\n\
+				\n\
+				return irradiance;\n\
+			}\n\
+			\n\
+			void main() {\n\
+				vec3 N = normalize( v_normal );\n\
+				SH9Color shs;\n\
+				for(int i = 0; i < 9; ++i)\n\
+					shs.c[i] = u_sh_coeffs[i];\n\
+				gl_FragColor = vec4( ComputeSHDiffuse( N, shs ),1.0);\n\
+			}\
+		';
+
+		var environment_shader = gl.shaders["environment"] = new GL.Shader(vertex_shader,skybox_fragment_shader);
+		var reflection_shader = gl.shaders["reflection"] = new GL.Shader(vertex_shader,reflection_fragment_shader);
+		var shs_shader = gl.shaders["shs"] = new GL.Shader(vertex_shader,sh_fragment_shader);
+
+		//global settings
+		var bg_color = vec4.fromValues(0.9,0.9,0.9,1);
+
+		//main render loop
+		var last = now = getTime();
+		requestAnimationFrame(animate);
+		function animate() {
+			requestAnimationFrame( animate );
+
+			environment_shader.uniforms({ u_level: 5 * (Math.sin(getTime() * 0.001) * 0.5 + 0.5) });
+			reflection_shader.uniforms({ u_level: 5 * (Math.sin(getTime() * 0.001) * 0.5 + 0.5) });
+
+			//render
+			renderer.clear( bg_color );
+			renderer.render( scene, camera );
+
+			//update
+			last = now;
+			now = getTime();
+			var dt = (now - last) * 0.001;
+			scene.update(dt);
+		}
+
+		//input
+		renderer.context.captureMouse(true);
+		renderer.context.onmousemove = function(e)
+		{
+			if(e.dragging)
+			{
+				if(e.buttons & 4 )
+				{
+					var dist = vec3.distance( camera.position, camera.target ) * 0.01;
+					camera.moveLocal( [-e.deltax * dist, e.deltay * dist, 0], 0.1 );
+				}
+				else
+				{
+					camera.orbit( e.deltax * -0.01, [0,1,0] );
+					camera.orbit( e.deltay * -0.01, [1,0,0], null, true );
+				}
+			}
+		}
+
+		renderer.context.onmousewheel = function(e)
+		{
+			var direction = (e.wheel > 0) ? 1 : -1;
+			var offset = 1 + direction * -0.1;
+			camera.orbitDistanceFactor( offset );
+		}
+
+		renderer.context.captureKeys(true);
+		renderer.context.onkey = function(e)
+		{
+		}
+
+		renderer.onPreRenderNode = function(node)
+		{
+		}
+
+		renderer.onPostRender = function()
+		{
+		}
+
+		enableDrop();
+	}
+
+	//Allows to DRAG AND DROP files
+	var dropbox = null;
+	function enableDrop()
+	{
+		dropbox = document.body;
+		dropbox.addEventListener("dragenter", onDragEvent, false);
+		function onDragEvent(evt)
+		{
+			for(var i in evt.dataTransfer.types)
+				if(evt.dataTransfer.types[i] == "Files")
+				{
+					if(evt.type != "dragover") console.log("Drag event: " + evt.type);
+					evt.stopPropagation();
+					evt.preventDefault();
+
+					dropbox.addEventListener("dragexit", onDragEvent, false);
+					dropbox.addEventListener("dragover", onDragEvent, false);
+					dropbox.addEventListener("drop", onDrop, false);
+				}
+		}
+
+		function onDrop(evt)
+		{
+			dropbox.removeEventListener("dragexit", onDragEvent, false);
+			dropbox.removeEventListener("dragover", onDragEvent, false);
+			dropbox.removeEventListener("drop", onDrop, false);
+			//load file in memory
+			onFileDrop(evt);
+		}
+	}
+
+	function onFileDrop(evt)
+	{
+		evt.stopPropagation();
+		evt.preventDefault();
+
+		var files = evt.dataTransfer.files;
+		
+		var file = files[0];
+		var reader = new FileReader();
+		reader.onload = function(e){
+			var data = HDRE.parse(e.target.result);
+			var tex = HDRE.toTexture(data);
+			gl.textures["environment"] = tex;
+		}
+		reader.readAsArrayBuffer( file );
+	}
+
+	</script>
+</head>
+<body>
+<script>init();</script>
+</body>
+</html>
+
+
