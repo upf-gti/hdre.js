@@ -21,12 +21,20 @@
 	var FLOAT		= 03;
 	var U_BYTE_RGBE	= 04;
 
+	var ARRAY_TYPES = {
+		1: Uint8Array,
+		2: Uint16Array,
+		3: Float32Array,
+		4: Uint8Array
+	}
+
 	var HDRE = global.HDRE = {
 
-		version: 2.75,	// v1.5 adds spherical harmonics coeffs for the skybox
+		version: 3.0,	// v1.5 adds spherical harmonics coeffs for the skybox
 						// v2.0 adds byte padding for C++ uses				
 						// v2.5 allows mip levels to be smaller than 8x8
 						// v2.75 RGB format supported
+						// v3.0 HDREImage and more actions 
 		maxFileSize: 60e6 // bytes
 	};
 
@@ -44,7 +52,7 @@
 	// Float32Array -> Float32 -> 32 bits per element -> 4 bytes
 	// Float64Array -> Float64 -> 64 bits per element -> 8 bytes
 	
-	/** HEADER STRUCTURE (128 bytes)
+	/** HEADER STRUCTURE (256 bytes)
 	 * Header signature ("HDRE" in ASCII)	   4 bytes
 	 * Format Version						   4 bytes
 	 * Width									2 bytes
@@ -58,16 +66,145 @@
 	 */
 	
 	/**
+	* This class stores all the HDRE data
+	* @class HDREImage
+	*/
+
+	class HDREImage {
+
+		constructor(h, data, options) {
+
+			options = options || {};
+
+			if(!h)
+				throw("missing info");
+
+			// file info
+			this.version = h["version"];
+
+			// dimensions
+			this.width = h["width"];
+			this.height = h["height"];
+
+			// channel info
+			this.n_channels = h["nChannels"];
+			this.bits_channel = h["bpChannel"];
+			
+
+			// image info
+			this.data = data;
+			this.type = ARRAY_TYPES[h["type"]];
+			this.is_rgbe = options.rgbe !== undefined ? options.rgbe : false;
+			this.max_irradiance = h["maxIrradiance"];
+			this.shs = h["shs"];
+			this.size = h["size"];
+
+			// store h just in case
+			this.header = h;
+
+			console.log(this);
+		}
+
+		FlipY() {
+			
+		}
+
+		ToTexture() {
+
+			if(!window.GL)
+				throw("this function requires to use litegl.js");
+
+			var _envs = this.data;
+			if(!_envs)
+				return false;
+
+			// Get base enviroment texture
+			var tex_type = GL.FLOAT;
+			var data = _envs[0].data;
+			var flip_Y_sides = true;
+
+			if(this.type === Uint16Array) // HALF FLOAT
+				tex_type = GL.HALF_FLOAT_OES;
+			else if(this.type === Uint8Array) 
+				tex_type = GL.UNSIGNED_BYTE;
+
+			if(flip_Y_sides)
+			{
+				var tmp = data[2];
+				data[2] = data[3];
+				data[3] = tmp;
+			}
+
+			var options = {
+				format: this.n_channels === 4 ? gl.RGBA : gl.RGB,
+				type: tex_type,
+				minFilter: gl.LINEAR_MIPMAP_LINEAR,
+				texture_type: GL.TEXTURE_CUBE_MAP,
+				no_flip: !flip_Y_sides
+			};
+
+			var w = this.width;
+
+			GL.Texture.disable_deprecated = true;
+
+			var tex = new GL.Texture( w, w, options );
+			tex.mipmap_data = {};
+
+			// Generate mipmaps
+			tex.bind(0);
+
+			var num_mipmaps = Math.log(w) / Math.log(2);
+
+			// Upload prefilter mipmaps
+			for(var i = 0; i <= num_mipmaps; i++)
+			{
+				var level_info = _envs[i];
+				var levelsize = Math.pow(2,num_mipmaps - i);
+
+				if(level_info)
+				{
+					var pixels = level_info.data;
+					if(flip_Y_sides && i > 0)
+					{
+						var tmp = pixels[2];
+						pixels[2] = pixels[3];
+						pixels[3] = tmp;
+					}
+					for(var f = 0; f < 6; ++f)
+					{
+						tex.uploadData( pixels[f], { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
+					}
+					tex.mipmap_data[i] = pixels;
+				}
+				else
+				{
+					var zero = new Float32Array(levelsize * levelsize * this.n_channels);
+					for(var f = 0; f < 6; ++f)
+						tex.uploadData( zero, { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
+				}
+			}
+
+			GL.Texture.disable_deprecated = false;
+
+			// Store the texture 
+			tex.has_mipmaps = true;
+			tex.data = null;
+			tex.is_rgbe = this.is_rgbe;
+
+			return tex;
+		}
+	}
+
+	/**
 	* Write and download an HDRE
 	* @method write
-	* @param {Object} package - [lvl0: { w, h, pixeldata: [faces] }, lvl1: ...]
+	* @param {Object} mips_data - [lvl0: { w, h, pixeldata: [faces] }, lvl1: ...]
 	* @param {Number} width
 	* @param {Number} height
 	* @param {Object} options
 	*/
-	HDRE.write = function( package, width, height, options )
+	HDRE.write = function( mips_data, width, height, options )
 	{
-		
 		options = options || {};
 
 		var array_type = Float32Array;
@@ -75,10 +212,7 @@
 		if(options.type && options.type.BYTES_PER_ELEMENT)
 			array_type = options.type;
 
-		var RGBE = false;
-
-		if(options.rgbe !== undefined)
-			RGBE = options.rgbe;
+		var RGBE = options.rgbe !== undefined ? options.rgbe : false;
 
 		/*
 		*   Create header
@@ -86,8 +220,8 @@
 
 		// get total pixels
 		var size = 0;
-		for(var i = 0; i < package.length; i++)
-			size += package[i].width * package[i].height;
+		for(var i = 0; i < mips_data.length; i++)
+			size += mips_data[i].width * mips_data[i].height;
 
 		// File format information
 		var numFaces = 6;
@@ -133,9 +267,9 @@
 		var data = new array_type(size * numFaces * numChannels);
 		var offset = 0;
 
-		for(var i = 0; i < package.length; i++)
+		for(var i = 0; i < mips_data.length; i++)
 		{
-			let _env = package[i],
+			let _env = mips_data[i],
 				w = _env.width,
 				h = _env.height,
 				s = w * h * numChannels;
@@ -316,16 +450,15 @@
 		var header = {
 			version: v,
 			signature: sg,
-			headerSize: s,
 			type: a,
 			width: w,
 			height: h,
-			max_size: m,
 			nChannels: c,
 			bpChannel: b,
 			maxIrradiance: i,
 			shs: shs,
-			encoding: isLE
+			encoding: isLE,
+			size: fileSizeInBytes
 		};
 
 		// console.table(header);
@@ -342,17 +475,11 @@
 
 
 		/*
-		*   BEGIN READING DATA (Uint8 or Float32)
+		*   BEGIN READING DATA
 		*/
 
 		var dataBuffer = buffer.slice(s);
-
-		var array_type = Float32Array;
-		
-		if(a == U_BYTE || a == U_BYTE_RGBE)
-			array_type = Uint8Array;
-		else if(a == HALF_FLOAT)
-			array_type = Uint16Array;
+		var array_type = ARRAY_TYPES[header.type];
 
 		var dataSize = dataBuffer.byteLength / 4;
 		var data = new array_type(dataSize);
@@ -368,8 +495,6 @@
 
 		var numChannels = c;
 
-		var begin = 0, 
-			end = w * w * numChannels * 6;
 		var ems = [],
 			precomputed = [];
 
@@ -429,121 +554,68 @@
 			else
 				w = Math.max(8, originalWidth / Math.pow(2, mip_level));
 
-			//?????
 			if(options.onprogress)
 				options.onprogress( i );
 		}
 
-		// return 6 images: original env + 5 levels of roughness
-		// pass this to a GL.Texture
-		return { header: header, _envs: precomputed };
+		var image = new HDREImage(header, precomputed, options);
+		return image;
 	}
 
-	HDRE.toTexture = function( data, tex_name, onprogress )
+	/*
+		use HDREImage class method insted of this one
+	*/
+	HDRE.toTexture = function( data )
 	{
-		if(!window.GL)
-			throw("this function requires to use litegl.js");
-		var onprogress = onprogress || this.default_progress;
-		var r = null;
-		if(data.constructor === ArrayBuffer)
-			r = HDRE.parse(buffer, { onprogress: onprogress });
+		if(data.constructor === HDREImage)
+		console.warn("Legacy function, use HDRImage.ToTexture instead");
 		else
-			r = data;
+		throw("bad params, HDREImage needed");
 
-		if(!r)
-			return false;
-
-		var _envs = r._envs;
-		var header = r.header;
-		var textures = [];
-
-		var version = header.version;
-
-		// Get base enviroment texture
-		var type = GL.FLOAT;
-		var data = _envs[0].data;
-		var is_rgbe = false;
-		var flip_Y_sides = true;
-
-		if(header.array_type == 01) // UBYTE
-			type = GL.UNSIGNED_BYTE;
-		else if(header.array_type == 02) // HALF FLOAT
-			type = GL.HALF_FLOAT_OES;
-		else if(header.array_type == 04) { // RGBE
-			type = GL.UNSIGNED_BYTE;
-			is_rgbe = true;
-		}
-
-		if(flip_Y_sides)
-		{
-			var tmp = data[2];
-			data[2] = data[3];
-			data[3] = tmp;
-		}
-
-		var options = {
-			format: header.nChannels === 4 ? gl.RGBA : gl.RGB,
-			type: type,
-			minFilter: gl.LINEAR_MIPMAP_LINEAR,
-			texture_type: GL.TEXTURE_CUBE_MAP,
-			//pixel_data: data,
-			no_flip: !flip_Y_sides
-		};
-
-		var w = _envs[0].width;
-
-		//gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flip_Y_sides );
-		GL.Texture.disable_deprecated = true;
-
-		var tex = new GL.Texture( w, w, options );
-		tex.mipmap_data = {};
-
-		// Generate mipmaps
-		tex.bind(0);
-
-		var num_mipmaps = Math.log(w) / Math.log(2);
-
-		// Upload prefilter mipmaps
-		for(var i = 0; i <= num_mipmaps; i++)
-		{
-			var level_info = _envs[i];
-			var levelsize = Math.pow(2,num_mipmaps - i);
-
-			if(level_info)
-			{
-				var pixels = level_info.data;
-				if(flip_Y_sides && i > 0)
-				{
-					var tmp = pixels[2];
-					pixels[2] = pixels[3];
-					pixels[3] = tmp;
-				}
-				for(var f = 0; f < 6; ++f)
-				{
-					//if(flip_Y_sides && i > 0)
-					//	GL.Texture.flipYData( pixels[f], levelsize, levelsize, header.nChannels );
-					tex.uploadData( pixels[f], { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
-				}
-				tex.mipmap_data[i] = pixels;
-			}
-			else
-			{
-				var zero = new Float32Array(levelsize * levelsize * header.nChannels);
-				for(var f = 0; f < 6; ++f)
-					tex.uploadData( zero, { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
-			}
-		}
-
-		//gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true );
-		GL.Texture.disable_deprecated = false;
-
-		// Store the texture 
-		tex.has_mipmaps = true;
-		tex.data = null;
-		tex.is_rgbe = is_rgbe;
-
-		return tex;
+		var image = data;
+		return image.ToTexture();
 	}
+
+	// Shader Code
+
+	//Read environment mips
+	HDRE.read_cubemap_fs = '\
+		vec3 readPrefilteredCube(samplerCube cube_texture, float roughness, vec3 R) {\n\
+			float f = roughness * 5.0;\n\
+			vec3 color = textureCubeLodEXT(cube_texture, R, f).rgb;\n\
+			return color;\n\
+		}\n\
+	';
+
+	//Show environment and its mipmaps
+	HDRE.skybox_fragment_shader = '\
+		#extension GL_EXT_shader_texture_lod : enable\n\
+		precision highp float;\n\
+		varying vec3 v_normal;\n\
+		uniform samplerCube u_color_texture;\n\
+		uniform float u_level;\n\
+		void main() {\n\
+			vec3 N = normalize( v_normal );\n\
+			gl_FragColor = textureCubeLodEXT( u_color_texture, N, u_level );\n\
+		}\
+	';
+
+	//Show reflection
+	HDRE.reflection_fragment_shader = '\
+		#extension GL_EXT_shader_texture_lod : enable\n\
+		precision highp float;\n\
+		varying vec3 v_normal;\n\
+		varying vec3 v_pos;\n\
+		uniform samplerCube u_color_texture;\n\
+		uniform float u_level;\n\
+		uniform vec3 u_camera_position;\n\
+		void main() {\n\
+			vec3 N = normalize( v_normal );\n\
+			vec3 E = normalize(v_pos - u_camera_position);\n\
+			vec3 R = reflect( E, N );\n\
+			gl_FragColor = textureCubeLodEXT( u_color_texture, R, u_level );\n\
+		}\
+	';
 
 	/* 
 		Private library methods
