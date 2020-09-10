@@ -70,129 +70,167 @@
 	* @class HDREImage
 	*/
 
-	class HDREImage {
+	function HDREImage(header, data, o) {
 
-		constructor(h, data, options) {
+		if(this.constructor !== HDREImage)
+		throw("You must use new to create a HDREImage");
 
-			options = options || {};
+		this._ctor(header, data);
 
-			if(!h)
-				throw("missing info");
+		if(o)
+		this.configure(o);
+		
+	}
 
-			// file info
-			this.version = h["version"];
+	HDREImage.prototype._ctor = function(h, data) {
 
-			// dimensions
-			this.width = h["width"];
-			this.height = h["height"];
+		if(!h)
+			throw("missing info");
 
-			// channel info
-			this.n_channels = h["nChannels"];
-			this.bits_channel = h["bpChannel"];
-			
+		// file info
+		this.version = h["version"];
 
-			// image info
-			this.data = data;
-			this.type = ARRAY_TYPES[h["type"]];
-			this.is_rgbe = options.rgbe !== undefined ? options.rgbe : false;
-			this.max_irradiance = h["maxIrradiance"];
-			this.shs = h["shs"];
-			this.size = h["size"];
+		// dimensions
+		this.width = h["width"];
+		this.height = h["height"];
 
-			// store h just in case
-			this.header = h;
+		// channel info
+		this.n_channels = h["nChannels"];
+		this.bits_channel = h["bpChannel"];
+		
+		// image info
+		this.data = data;
+		this.type = ARRAY_TYPES[h["type"]];
+		this.max_irradiance = h["maxIrradiance"];
+		this.shs = h["shs"];
+		this.size = h["size"];
 
-			console.log(this);
+		// store h just in case
+		this.header = h;
+
+		console.log(this);
+	}
+	
+	HDREImage.prototype.configure = function(o) {
+
+		o = o || {};
+
+		this.is_rgbe = o.rgbe !== undefined ? o.rgbe : false;
+	}
+
+	HDREImage.prototype.FlipY = function() {
+
+	}
+
+	HDREImage.prototype.ToTexture = function() {
+		
+		if(!window.GL)
+			throw("this function requires to use litegl.js");
+
+		var _envs = this.data;
+		if(!_envs)
+			return false;
+
+		// Get base enviroment texture
+		var tex_type = GL.FLOAT;
+		var data = _envs[0].data;
+		var flip_Y_sides = true;
+
+		if(this.type === Uint16Array) // HALF FLOAT
+			tex_type = GL.HALF_FLOAT_OES;
+		else if(this.type === Uint8Array) 
+			tex_type = GL.UNSIGNED_BYTE;
+
+		if(flip_Y_sides)
+		{
+			var tmp = data[2];
+			data[2] = data[3];
+			data[3] = tmp;
 		}
 
-		FlipY() {
-			
-		}
+		var options = {
+			format: this.n_channels === 4 ? gl.RGBA : gl.RGB,
+			type: tex_type,
+			minFilter: gl.LINEAR_MIPMAP_LINEAR,
+			texture_type: GL.TEXTURE_CUBE_MAP,
+			no_flip: !flip_Y_sides
+		};
 
-		ToTexture() {
+		var w = this.width;
 
-			if(!window.GL)
-				throw("this function requires to use litegl.js");
+		GL.Texture.disable_deprecated = true;
 
-			var _envs = this.data;
-			if(!_envs)
-				return false;
+		var tex = new GL.Texture( w, w, options );
+		tex.mipmap_data = {};
 
-			// Get base enviroment texture
-			var tex_type = GL.FLOAT;
-			var data = _envs[0].data;
-			var flip_Y_sides = true;
+		// Generate mipmaps
+		tex.bind(0);
 
-			if(this.type === Uint16Array) // HALF FLOAT
-				tex_type = GL.HALF_FLOAT_OES;
-			else if(this.type === Uint8Array) 
-				tex_type = GL.UNSIGNED_BYTE;
+		var num_mipmaps = Math.log(w) / Math.log(2);
 
-			if(flip_Y_sides)
+		// Upload prefilter mipmaps
+		for(var i = 0; i <= num_mipmaps; i++)
+		{
+			var level_info = _envs[i];
+			var levelsize = Math.pow(2,num_mipmaps - i);
+
+			if(level_info)
 			{
-				var tmp = data[2];
-				data[2] = data[3];
-				data[3] = tmp;
+				var pixels = level_info.data;
+				if(flip_Y_sides && i > 0)
+				{
+					var tmp = pixels[2];
+					pixels[2] = pixels[3];
+					pixels[3] = tmp;
+				}
+				for(var f = 0; f < 6; ++f)
+				{
+					tex.uploadData( pixels[f], { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
+				}
+				tex.mipmap_data[i] = pixels;
 			}
-
-			var options = {
-				format: this.n_channels === 4 ? gl.RGBA : gl.RGB,
-				type: tex_type,
-				minFilter: gl.LINEAR_MIPMAP_LINEAR,
-				texture_type: GL.TEXTURE_CUBE_MAP,
-				no_flip: !flip_Y_sides
-			};
-
-			var w = this.width;
-
-			GL.Texture.disable_deprecated = true;
-
-			var tex = new GL.Texture( w, w, options );
-			tex.mipmap_data = {};
-
-			// Generate mipmaps
-			tex.bind(0);
-
-			var num_mipmaps = Math.log(w) / Math.log(2);
-
-			// Upload prefilter mipmaps
-			for(var i = 0; i <= num_mipmaps; i++)
+			else
 			{
-				var level_info = _envs[i];
-				var levelsize = Math.pow(2,num_mipmaps - i);
-
-				if(level_info)
-				{
-					var pixels = level_info.data;
-					if(flip_Y_sides && i > 0)
-					{
-						var tmp = pixels[2];
-						pixels[2] = pixels[3];
-						pixels[3] = tmp;
-					}
-					for(var f = 0; f < 6; ++f)
-					{
-						tex.uploadData( pixels[f], { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
-					}
-					tex.mipmap_data[i] = pixels;
-				}
-				else
-				{
-					var zero = new Float32Array(levelsize * levelsize * this.n_channels);
-					for(var f = 0; f < 6; ++f)
-						tex.uploadData( zero, { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
-				}
+				var zero = new Float32Array(levelsize * levelsize * this.n_channels);
+				for(var f = 0; f < 6; ++f)
+					tex.uploadData( zero, { no_flip: !flip_Y_sides, cubemap_face: f, mipmap_level: i}, true );
 			}
-
-			GL.Texture.disable_deprecated = false;
-
-			// Store the texture 
-			tex.has_mipmaps = true;
-			tex.data = null;
-			tex.is_rgbe = this.is_rgbe;
-
-			return tex;
 		}
+
+		GL.Texture.disable_deprecated = false;
+
+		// Store the texture 
+		tex.has_mipmaps = true;
+		tex.data = null;
+		tex.is_rgbe = this.is_rgbe;
+
+		return tex;
+	}
+
+	/**
+	* This class creates HDRE from different sources
+	* @class HDREBuilder
+	*/
+
+	function HDREBuilder(o) {
+
+		if(this.constructor !== HDREBuilder)
+		throw("You must use new to create a HDREBuilder");
+
+		this._ctor();
+
+		if(o)
+		this.configure(o);
+	}
+	
+	HDREBuilder.prototype._ctor = function() {
+
+	}
+
+	HDREBuilder.prototype.configure = function(o) {
+
+		o = o || {};
+
 	}
 
 	/**
@@ -562,20 +600,6 @@
 		return image;
 	}
 
-	/*
-		use HDREImage class method insted of this one
-	*/
-	HDRE.toTexture = function( data )
-	{
-		if(data.constructor === HDREImage)
-		console.warn("Legacy function, use HDRImage.ToTexture instead");
-		else
-		throw("bad params, HDREImage needed");
-
-		var image = data;
-		return image.ToTexture();
-	}
-
 	// Shader Code
 
 	//Read environment mips
@@ -587,34 +611,56 @@
 		}\n\
 	';
 
-	//Show environment and its mipmaps
-	HDRE.skybox_fragment_shader = '\
-		#extension GL_EXT_shader_texture_lod : enable\n\
-		precision highp float;\n\
+	//Show SHs
+	HDRE.irradiance_shs_fs = '\
 		varying vec3 v_normal;\n\
-		uniform samplerCube u_color_texture;\n\
-		uniform float u_level;\n\
-		void main() {\n\
-			vec3 N = normalize( v_normal );\n\
-			gl_FragColor = textureCubeLodEXT( u_color_texture, N, u_level );\n\
-		}\
-	';
-
-	//Show reflection
-	HDRE.reflection_fragment_shader = '\
-		#extension GL_EXT_shader_texture_lod : enable\n\
-		precision highp float;\n\
-		varying vec3 v_normal;\n\
-		varying vec3 v_pos;\n\
-		uniform samplerCube u_color_texture;\n\
-		uniform float u_level;\n\
-		uniform vec3 u_camera_position;\n\
-		void main() {\n\
-			vec3 N = normalize( v_normal );\n\
-			vec3 E = normalize(v_pos - u_camera_position);\n\
-			vec3 R = reflect( E, N );\n\
-			gl_FragColor = textureCubeLodEXT( u_color_texture, R, u_level );\n\
-		}\
+		uniform vec3 u_sh_coeffs[9];\n\
+		\n\
+		const float Pi = 3.141592654;\n\
+		const float CosineA0 = Pi;\n\
+		const float CosineA1 = (2.0 * Pi) / 3.0;\n\
+		const float CosineA2 = Pi * 0.25;\n\
+		\n\
+		struct SH9 { float c[9]; };\n\
+		struct SH9Color { vec3 c[9]; };\n\
+		\n\
+		void SHCosineLobe(in vec3 dir, out SH9 sh)\n\
+		{\n\
+			// Band 0\n\
+			sh.c[0] = 0.282095 * CosineA0;\n\
+			\n\
+			// Band 1\n\
+			sh.c[1] = 0.488603 * dir.y * CosineA1;\n\
+			sh.c[2] = 0.488603 * dir.z * CosineA1;\n\
+			sh.c[3] = 0.488603 * dir.x * CosineA1;\n\
+			\n\
+			sh.c[4] = 1.092548 * dir.x * dir.y * CosineA2;\n\
+			sh.c[5] = 1.092548 * dir.y * dir.z * CosineA2;\n\
+			sh.c[6] = 0.315392 * (3.0 * dir.z * dir.z - 1.0) * CosineA2;\n\
+			sh.c[7] = 1.092548 * dir.x * dir.z * CosineA2;\n\
+			sh.c[8] = 0.546274 * (dir.x * dir.x - dir.y * dir.y) * CosineA2;\n\
+		}\n\
+		\n\
+		vec3 ComputeSHDiffuse(in vec3 normal)\n\
+		{\n\
+			SH9Color shs;\n\
+			for(int i = 0; i < 9; ++i)\n\
+				shs.c[i] = u_sh_coeffs[i];\n\
+			\n\
+			// Compute the cosine lobe in SH, oriented about the normal direction\n\
+			SH9 shCosine;\n\
+			SHCosineLobe(normal, shCosine);\n\
+			\n\
+			// Compute the SH dot product to get irradiance\n\
+			vec3 irradiance = vec3(0.0);\n\
+			const int num = 9;\n\
+			for(int i = 0; i < num; ++i)\n\
+				irradiance += radiance.c[i] * shCosine.c[i];\n\
+			\n\
+			vec3 shDiffuse = irradiance * (1.0 / Pi);\n\
+			\n\
+			return irradiance;\n\
+		}\n\
 	';
 
 	/* 
