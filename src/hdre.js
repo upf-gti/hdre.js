@@ -34,11 +34,20 @@
 						// v2.0 adds byte padding for C++ uses				
 						// v2.5 allows mip levels to be smaller than 8x8
 						// v2.75 RGB format supported
-						// v3.0 HDREImage and more actions 
+						// v3.0 HDREImage and HDREBuilder
 		maxFileSize: 60e6 // bytes
 	};
 
-	// En la v1.4 poner maxFileSize a 58 000 000 (bytes)
+	HDRE.DEFAULT 	= 0;
+	HDRE.EXR 		= 1;
+	HDRE.RADIANCE 	= 2;
+
+	HDRE.CUBE_MAP_POSITIVE_X = 0;
+	HDRE.CUBE_MAP_POSITIVE_Y = 1;
+	HDRE.CUBE_MAP_POSITIVE_Z = 2;
+	HDRE.CUBE_MAP_NEGATIVE_X = 3;
+	HDRE.CUBE_MAP_NEGATIVE_Y = 4;
+	HDRE.CUBE_MAP_NEGATIVE_Z = 5;
 	
 	HDRE.setup = function(o)
 	{
@@ -47,10 +56,6 @@
 			throw("setup already called");
 		HDRE.configuration = o;
 	}
-	
-	// Uint8Array -> UInt8 -> 8 bits per element -> 1 byte
-	// Float32Array -> Float32 -> 32 bits per element -> 4 bytes
-	// Float64Array -> Float64 -> 64 bits per element -> 8 bytes
 	
 	/** HEADER STRUCTURE (256 bytes)
 	 * Header signature ("HDRE" in ASCII)	   4 bytes
@@ -79,8 +84,9 @@
 
 		if(o)
 		this.configure(o);
-		
 	}
+
+	HDRE.HDREImage = HDREImage;
 
 	HDREImage.prototype._ctor = function(h, data) {
 
@@ -107,8 +113,6 @@
 
 		// store h just in case
 		this.header = h;
-
-		console.log(this);
 	}
 	
 	HDREImage.prototype.configure = function(o) {
@@ -122,7 +126,7 @@
 
 	}
 
-	HDREImage.prototype.ToTexture = function() {
+	HDREImage.prototype.ToTexture = function(flip_Y_sides) {
 		
 		if(!window.GL)
 			throw("this function requires to use litegl.js");
@@ -134,7 +138,6 @@
 		// Get base enviroment texture
 		var tex_type = GL.FLOAT;
 		var data = _envs[0].data;
-		var flip_Y_sides = true;
 
 		if(this.type === Uint16Array) // HALF FLOAT
 			tex_type = GL.HALF_FLOAT_OES;
@@ -223,15 +226,730 @@
 		this.configure(o);
 	}
 	
+	HDRE.HDREBuilder = HDREBuilder;
+
 	HDREBuilder.prototype._ctor = function() {
 
+		this.flip_Y_sides = false;
 	}
 
 	HDREBuilder.prototype.configure = function(o) {
 
 		o = o || {};
-
 	}
+
+	HDREBuilder.prototype.FromHDR = function(buffer, format, size) {
+
+		var data, result;
+
+		switch (format) {
+			case HDRE.RADIANCE:
+				data = this._parseRadiance( buffer );
+					break;
+		
+			case HDRE.EXR:
+				data = this._parseEXR( buffer );
+					break;
+
+			default:
+				throw("cannot parse hdr file");
+		}
+
+		result = this.CreateTexture(data, size);
+		return result;
+	}
+
+	/**
+    * Create a texture based in data received as input 
+    * @method CreateTexture
+    * @param {Object} data 
+    * @param {Number} cubemap_size
+    */
+   	HDREBuilder.prototype.CreateTexture = function( data, cubemap_size, options )
+	{
+		if(!window.GL)
+		throw("this function requires to use litegl.js");
+
+		if(!data)
+		throw( "No data to get texture" );
+
+		options = options || {};		
+
+		var width = data.width,
+			height = data.height;
+
+		var is_cubemap = ( width/4 === height/3 && GL.isPowerOfTwo(width) ) ? true : false;
+
+		var channels = data.numChannels;
+		var pixelData = data.rgba;
+		var pixelFormat = channels === 4 ? gl.RGBA : gl.RGB; // EXR and HDR files are written in 4 
+
+		if(!width || !height)
+		throw( 'No width or height to generate Texture' );
+
+		if(!pixelData)
+		throw( 'No data to generate Texture' );
+
+		var texture = null;
+
+		var params = {
+			format: pixelFormat,
+			type: gl.FLOAT,
+			pixel_data: pixelData
+		};
+
+		if(is_cubemap)
+		{
+			var square_length = pixelData.length / 12;
+			var faces = parseFaces(square_length, width, height, pixelData);
+
+			width /= 4;
+			height /= 3;
+
+			params.texture_type = GL.TEXTURE_CUBE_MAP;
+			params.pixel_data = faces;
+
+			texture = new GL.Texture( width, height, params);
+
+			var temp = texture.clone();
+			var shader = new GL.Shader(Shader.SCREEN_VERTEX_SHADER, HDRE.CopyCubemap_Shader_Fragment);
+			
+			//save state
+			var current_fbo = gl.getParameter( gl.FRAMEBUFFER_BINDING );
+			var viewport = gl.getViewport();
+			var fb = gl.createFramebuffer();
+			gl.bindFramebuffer( gl.FRAMEBUFFER, fb );
+			gl.viewport(0,0, width, height);
+
+			var mesh = Mesh.getScreenQuad();
+			
+			// Bind original texture
+			texture.bind(0);
+			mesh.bindBuffers( shader );
+			shader.bind();
+
+			var rot_matrix = GL.temp_mat3;
+			var cams = GL.Texture.cubemap_camera_parameters;
+
+			for(var i = 0; i < 6; i++)
+			{
+				gl.framebufferTexture2D( gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, temp.handler, 0);
+				var face_info = cams[i];
+
+				mat3.identity( rot_matrix );
+				rot_matrix.set( face_info.right, 0 );
+				rot_matrix.set( face_info.up, 3 );
+				rot_matrix.set( face_info.dir, 6 );
+				shader._setUniform( "u_rotation", rot_matrix );
+				shader._setUniform( "u_flip", true );
+				gl.drawArrays( gl.TRIANGLES, 0, 6 );
+			}
+
+			mesh.unbindBuffers( shader );
+			//restore previous state
+			gl.setViewport(viewport); //restore viewport
+			gl.bindFramebuffer( gl.FRAMEBUFFER, current_fbo ); //restore fbo
+			gl.bindTexture(temp.texture_type, null); //disable
+
+			temp.is_cubemap = is_cubemap;
+		}
+
+		// basic texture or sphere map
+		else 
+		{
+			texture = new GL.Texture( width, height, params);
+		}
+			
+		// texture properties
+		texture.wrapS = gl.CLAMP_TO_EDGE;
+		texture.wrapT = gl.CLAMP_TO_EDGE;
+		texture.magFilter = gl.LINEAR;
+		texture.minFilter = gl.LINEAR_MIPMAP_LINEAR;
+
+		if(is_cubemap)
+			return temp;
+
+		if(!options.discard_spheremap)
+			gl.textures["tmp_spheremap"] = texture;
+		
+		return this.ToCubemap( texture, cubemap_size );
+	}
+
+	/**
+	 * Converts spheremap or panoramic map to a cubemap texture 
+	 * @method ToCubemap
+	 * @param {Texture} tex
+	 * @param {Number} cubemap_size
+	 */
+	HDREBuilder.prototype.ToCubemap = function( tex, cubemap_size )
+	{
+		var size = cubemap_size || this.CUBE_MAP_SIZE;
+		if(!size)
+		throw( "CUBEMAP size not defined" );
+
+		//save state
+		var current_fbo = gl.getParameter( gl.FRAMEBUFFER_BINDING );
+		var viewport = gl.getViewport();
+		var fb = gl.createFramebuffer();
+		gl.bindFramebuffer( gl.FRAMEBUFFER, fb );
+		gl.viewport(0,0, size, size);
+
+		var shader_type = (tex.width == tex.height * 2) ? HDRE.LatLong_Shader_Fragment : HDRE.Spheremap_Shader_Fragment;
+		var shader = new GL.Shader(Shader.SCREEN_VERTEX_SHADER, shader_type);
+
+		if(!shader)
+			throw( "No shader" );
+
+		// Bind original texture
+		tex.bind(0);
+		var mesh = Mesh.getScreenQuad();
+		mesh.bindBuffers( shader );
+		shader.bind();
+
+		var cubemap_texture = new GL.Texture( size, size, { format: tex.format, texture_type: GL.TEXTURE_CUBE_MAP, type: gl.FLOAT, minFilter: GL.LINEAR_MIPMAP_LINEAR } );
+		var rot_matrix = GL.temp_mat3;
+		var cams = GL.Texture.cubemap_camera_parameters;
+
+		for(var i = 0; i < 6; i++)
+		{
+			gl.framebufferTexture2D( gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, cubemap_texture.handler, 0);
+			var face_info = cams[i];
+
+			mat3.identity( rot_matrix );
+			rot_matrix.set( face_info.right, 0 );
+			rot_matrix.set( face_info.up, 3 );
+			rot_matrix.set( face_info.dir, 6 );
+			shader._setUniform( "u_rotation", rot_matrix );
+			gl.drawArrays( gl.TRIANGLES, 0, 6 );
+		}
+
+		mesh.unbindBuffers( shader );
+
+		//restore previous state
+		gl.setViewport(viewport); //restore viewport
+		gl.bindFramebuffer( gl.FRAMEBUFFER, current_fbo ); //restore fbo
+		gl.bindTexture(cubemap_texture.texture_type, null); //disable
+
+		cubemap_texture.bind(0);
+		// gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+		// cubemap_texture.has_mipmaps = true;
+		
+		var pixels = cubemap_texture.getCubemapPixels();
+
+		if(this.flip_Y_sides)
+		{
+			var tmp = pixels[2];
+			pixels[2] = pixels[3];
+			pixels[3] = tmp;
+		}
+
+		for(var f = 0; f < 6; ++f)
+			cubemap_texture.uploadData( pixels[f], { no_flip: false, cubemap_face: f} );
+
+		cubemap_texture.unbind();
+
+		return cubemap_texture;
+	}
+
+	/**
+	 * Blurs each of the level of a given environment texture
+	 * @method Filter
+	 * @param {Texture} texture
+	 * @param {Object} options
+	 */
+	HDREBuilder.prototype.Filter = function(texture, options) {
+
+		if(!window.GL)
+			throw("this function requires to use litegl.js");
+
+        var options = options || {};
+
+		if(!texture)
+		throw("no texture to filter");
+
+        var shader = new Shader(HDRE.Filter_Shader_Vertex, HDRE.Filter_Shader_Fragment);
+		var mipCount = 5;
+
+		//Reset Builder steps
+		this.LOAD_STEPS = 0;
+		this.CURRENT_STEP = 0;
+
+		//Clean previous filter data
+		texture.mipmap_data = {};
+
+		// compute necessary steps
+		for( var i = 1; i <= mipCount; ++i )
+		{
+			var faces = 6;
+			var blocks = Math.min(texture.width / Math.pow( 2, i ), 8);
+			this.LOAD_STEPS += faces * blocks;
+		}
+
+		for( let mip = 1; mip <= mipCount; mip++ )
+		{
+			this._blur( texture, mip, mipCount, shader, (function(result) {
+
+				// store
+				var pixels = result.getCubemapPixels();
+				texture.mipmap_data[mip] = pixels;
+
+				if(this.flip_Y_sides)
+				{
+					var tmp = pixels[2];
+					pixels[2] = pixels[3];
+					pixels[3] = tmp;
+				}
+
+				for(var f = 0; f < 6; ++f)
+					texture.uploadData( pixels[f], { no_flip: !this.flip_Y_sides, cubemap_face: f, mipmap_level: mip}, true );
+
+				if(this.CURRENT_STEP == this.LOAD_STEPS)
+				{
+					texture.data = null;
+
+					if(options.oncomplete)
+						options.oncomplete(texture);
+				}
+
+			}).bind(this));
+		}
+	}
+
+	/**
+    * Blurs a texture calling different draws from data
+    * @method blur
+    * @param {Texture} input
+    * @param {Number} level
+    * @param {Shader||String} shader
+    */
+   	HDREBuilder.prototype._blur = function(input, level, mipCount, shader, oncomplete)
+	{
+		var data = this._getDrawData(input, level, mipCount);
+	
+		if(!data)
+		throw('no data to blur');
+		
+		var options = {
+			format: gl.RGBA,
+			type: GL.FLOAT,
+			minFilter: gl.LINEAR_MIPMAP_LINEAR,
+			texture_type: GL.TEXTURE_CUBE_MAP
+		};
+
+		var result = new GL.Texture( data.size, data.size, options );
+		var current_draw = 0;
+
+		//save state
+		var current_fbo = gl.getParameter( gl.FRAMEBUFFER_BINDING );
+		var viewport = gl.getViewport();
+
+		var fb = gl.createFramebuffer();
+		var mesh = GL.Mesh.getScreenQuad();
+
+		var inner_blur = function() {
+
+			let drawInfo = data.draws[current_draw];
+			drawInfo.uniforms["u_mipCount"] = mipCount;
+			drawInfo.uniforms["u_emsize"] = input.width;
+
+			if(!shader)
+				throw( "No shader" );
+	
+			// bind blur fb each time 
+			gl.bindFramebuffer( gl.FRAMEBUFFER, fb );
+
+			input.bind(0);
+			shader.bind();
+			mesh.bindBuffers( shader );
+
+			gl.framebufferTexture2D( gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + drawInfo.face, result.handler, 0);
+			gl.viewport( drawInfo.viewport[0], drawInfo.viewport[1], drawInfo.viewport[2], drawInfo.viewport[3] );
+			
+			shader.uniforms( drawInfo.uniforms );
+			gl.drawArrays( gl.TRIANGLES, 0, 6 );
+
+			mesh.unbindBuffers( shader );
+			input.unbind();
+
+			//restore previous state each draw
+			gl.setViewport(viewport); //restore viewport
+			gl.bindFramebuffer( gl.FRAMEBUFFER, current_fbo ); //restore fbo
+			gl.bindTexture(result.texture_type, null);
+		}
+
+		var that = this;
+
+		var interval = setInterval( function() {
+
+			inner_blur();
+			current_draw++;
+
+			that.CURRENT_STEP++;
+			
+			if(current_draw == data.draws.length)
+			{
+				clearInterval(interval);
+
+				if(oncomplete)
+					oncomplete( result );
+			}
+	   }, 100 );
+   }
+
+	/**
+   * Gets info to blur in later pass
+   * @method getDrawData
+   * @param {Texture} input
+   * @param {Number} level
+   * @param {Shader} shader
+   */
+  	HDREBuilder.prototype._getDrawData = function(input, level, mipCount)
+   	{
+		var blocks = 8;
+
+		var size = input.height; // by default
+		size /= Math.pow(2, level);
+
+		// Recompute number of blocks
+		blocks = Math.min(blocks, size);
+
+		var totalLevels = mipCount;
+		var roughness = (level+1) / (totalLevels + 1);
+
+		var deferredInfo = {};
+
+		var cams = GL.Texture.cubemap_camera_parameters;
+		var cubemap_cameras = [];
+		var draws = [];
+
+		for( let c in cams ) {
+
+			let face_info = cams[c];
+			let rot_matrix = mat3.create();
+			mat3.identity( rot_matrix );
+			rot_matrix.set( face_info.right, 0 );
+			rot_matrix.set( face_info.up, 3 );
+			rot_matrix.set( face_info.dir, 6 );
+			cubemap_cameras.push( rot_matrix );
+		}
+
+		cubemap_cameras = GL.linearizeArray( cubemap_cameras );
+		
+		for(var i = 0; i < 6; i++)
+		{
+			var face_info = cams[i];
+
+			let rot_matrix = mat3.create();
+			mat3.identity( rot_matrix );
+			rot_matrix.set( face_info.right, 0 );
+			rot_matrix.set( face_info.up, 3 );
+			rot_matrix.set( face_info.dir, 6 );
+
+			for( var j = 0; j < blocks; j++ )
+			{
+				let uniforms = {
+						'u_rotation': rot_matrix,
+						'u_blocks': blocks,
+						'u_mipCount': mipCount,
+						'u_roughness': roughness,
+						'u_ioffset': j * (1/blocks),
+						'u_cameras': cubemap_cameras,
+						'u_color_texture': 0
+					};
+
+				let blockSize = size/blocks;
+
+				draws.push({
+					uniforms: uniforms, 
+					viewport: [j * blockSize, 0, blockSize, size],
+					face: i
+				});
+			}
+		}
+
+		deferredInfo['blocks'] = blocks;
+		deferredInfo['draws'] = draws;
+		deferredInfo['size'] = size;
+		deferredInfo['roughness'] = roughness;
+		deferredInfo['level'] = level;
+
+		return deferredInfo;
+	}
+
+	/**
+    * Parse the input data and get all the EXR info 
+    * @method _parseEXR
+    * @param {ArrayBuffer} buffer 
+    */
+   	HDREBuilder.prototype._parseEXR = function( buffer )
+	{
+		if(!Module.EXRLoader)
+			console.error('[cannot parse exr file] this function needs tinyexr.js to work');
+
+		function parseNullTerminatedString( buffer, offset ) {
+
+			var uintBuffer = new Uint8Array( buffer );
+			var endOffset = 0;
+		
+			while ( uintBuffer[ offset.value + endOffset ] != 0 ) 
+				endOffset += 1;
+		
+			var stringValue = new TextDecoder().decode(
+			new Uint8Array( buffer ).slice( offset.value, offset.value + endOffset )
+			);
+		
+			offset.value += (endOffset + 1);
+		
+			return stringValue;
+		
+		}
+		
+		function parseFixedLengthString( buffer, offset, size ) {
+		
+			var stringValue = new TextDecoder().decode(
+			new Uint8Array( buffer ).slice( offset.value, offset.value + size )
+			);
+		
+			offset.value += size;
+		
+			return stringValue;
+		
+		}
+
+		
+		function parseUint32( buffer, offset ) {
+		
+			var Uint32 = new DataView( buffer.slice( offset.value, offset.value + 4 ) ).getUint32( 0, true );
+			offset.value += 4;
+			return Uint32;
+		}
+		
+		function parseUint8( buffer, offset ) {
+		
+			var Uint8 = new DataView( buffer.slice( offset.value, offset.value + 1 ) ).getUint8( 0, true );
+			offset.value += 1;
+			return Uint8;
+		}
+		
+		function parseFloat32( buffer, offset ) {
+		
+			var float = new DataView( buffer.slice( offset.value, offset.value + 4 ) ).getFloat32( 0, true );
+			offset.value += 4;
+			return float;
+		}
+		
+		function parseUint16( buffer, offset ) {
+		
+			var Uint16 = new DataView( buffer.slice( offset.value, offset.value + 2 ) ).getUint16( 0, true );
+			offset.value += 2;
+			return Uint16;
+		}
+		
+		function parseChlist( buffer, offset, size ) {
+		
+			var startOffset = offset.value;
+			var channels = [];
+		
+			while ( offset.value < ( startOffset + size - 1 ) ) {
+		
+				var name = parseNullTerminatedString( buffer, offset );
+				var pixelType = parseUint32( buffer, offset ); // TODO: Cast this to UINT, HALF or FLOAT
+				var pLinear = parseUint8( buffer, offset );
+				offset.value += 3; // reserved, three chars
+				var xSampling = parseUint32( buffer, offset );
+				var ySampling = parseUint32( buffer, offset );
+			
+				channels.push( {
+					name: name,
+					pixelType: pixelType,
+					pLinear: pLinear,
+					xSampling: xSampling,
+					ySampling: ySampling
+				} );
+			}
+		
+			offset.value += 1;
+		
+			return channels;
+		}
+		
+		function parseChromaticities( buffer, offset ) {
+		
+			var redX = parseFloat32( buffer, offset );
+			var redY = parseFloat32( buffer, offset );
+			var greenX = parseFloat32( buffer, offset );
+			var greenY = parseFloat32( buffer, offset );
+			var blueX = parseFloat32( buffer, offset );
+			var blueY = parseFloat32( buffer, offset );
+			var whiteX = parseFloat32( buffer, offset );
+			var whiteY = parseFloat32( buffer, offset );
+		
+			return { redX: redX, redY: redY, greenX, greenY, blueX, blueY, whiteX, whiteY };
+		}
+		
+		function parseCompression( buffer, offset ) {
+		
+			var compressionCodes = [
+			'NO_COMPRESSION',
+			'RLE_COMPRESSION',
+			'ZIPS_COMPRESSION',
+			'ZIP_COMPRESSION',
+			'PIZ_COMPRESSION'
+			];
+		
+			var compression = parseUint8( buffer, offset );
+		
+			return compressionCodes[ compression ];
+		
+		}
+		
+		function parseBox2i( buffer, offset ) {
+		
+			var xMin = parseUint32( buffer, offset );
+			var yMin = parseUint32( buffer, offset );
+			var xMax = parseUint32( buffer, offset );
+			var yMax = parseUint32( buffer, offset );
+		
+			return { xMin: xMin, yMin: yMin, xMax: xMax, yMax: yMax };
+		}
+		
+		function parseLineOrder( buffer, offset ) {
+		
+			var lineOrders = [
+			'INCREASING_Y'
+			];
+		
+			var lineOrder = parseUint8( buffer, offset );
+		
+			return lineOrders[ lineOrder ];
+		}
+		
+		function parseV2f( buffer, offset ) {
+		
+			var x = parseFloat32( buffer, offset );
+			var y = parseFloat32( buffer, offset );
+		
+			return [ x, y ];
+		}
+		
+		function parseValue( buffer, offset, type, size ) {
+		
+			if ( type == 'string' || type == 'iccProfile' ) {
+				return parseFixedLengthString( buffer, offset, size );
+			} else if ( type == 'chlist' ) {
+				return parseChlist( buffer, offset, size );
+			} else if ( type == 'chromaticities' ) {
+				return parseChromaticities( buffer, offset );
+			} else if ( type == 'compression' ) {
+				return parseCompression( buffer, offset );
+			} else if ( type == 'box2i' ) {
+				return parseBox2i( buffer, offset );
+			} else if ( type == 'lineOrder' ) {
+				return parseLineOrder( buffer, offset );
+			} else if ( type == 'float' ) {
+				return parseFloat32( buffer, offset );
+			} else if ( type == 'v2f' ) {
+				return parseV2f( buffer, offset );
+			} 
+		}
+
+		var EXRHeader = {};
+
+		var magic = new DataView( buffer ).getUint32( 0, true );
+		var versionByteZero = new DataView( buffer ).getUint8( 4, true );
+		var fullMask = new DataView( buffer ).getUint8( 5, true );
+
+		// Start parsing header
+		var offset = { value: 8 };
+		var keepReading = true;
+
+		// clone buffer
+		buffer = buffer.slice(0);
+
+		while( keepReading )
+		{
+			var attributeName = parseNullTerminatedString( buffer, offset );
+
+			if ( attributeName == 0 )
+				keepReading = false;
+			else
+			{
+				var attributeType = parseNullTerminatedString( buffer, offset );
+				var attributeSize = parseUint32( buffer, offset );
+				var attributeValue = parseValue( buffer, offset, attributeType, attributeSize );
+				EXRHeader[ attributeName ] = attributeValue;
+			}
+		}
+
+		if (EXRHeader.compression === undefined)
+		throw "EXR compression is undefined";
+
+		var width = EXRHeader.dataWindow.xMax - EXRHeader.dataWindow.xMin + 1;
+		var height = EXRHeader.dataWindow.yMax - EXRHeader.dataWindow.yMin + 1;
+		var numChannels = EXRHeader.channels.length;
+
+		var byteArray;
+
+		//if (EXRHeader.compression === 'ZIP_COMPRESSION' || EXRHeader.compression == 'NO_COMPRESSION') {
+
+			// get all content from the exr
+			try {
+				var data = new Uint8Array(buffer);
+				var exr = new Module.EXRLoader(data);
+
+				if(exr.ok())
+					byteArray = exr.getBytes();
+				else 
+					throw( "Error getting bytes from EXR file" );
+
+			} catch (error) {
+				console.error(error);
+			}
+
+		/* }
+		else
+		{
+			console.error('Cannot decompress unsupported compression');
+			return; 
+		}*/
+
+		var data = {
+			header: EXRHeader,
+			width: width,
+			height: height,
+			rgba: byteArray,
+			numChannels: numChannels
+		};
+
+		return data;
+	}
+
+	/**
+    * Parse the input data and get all the HDR (radiance file) info 
+    * @method parseRadiance
+    * @param {ArrayBuffer} buffer 
+    */
+	HDREBuilder.prototype._parseRadiance = function( buffer )
+	{
+		if(!parseHdr)
+			console.error('[cannot parse hdr file] this function needs hdr-parser.js to work');
+		
+		var img = parseHdr(buffer);
+
+		var data = {
+			header: null,
+			width: img.shape[0],
+			height: img.shape[1],
+			rgba: img.data,
+			numChannels: img.data.length/(img.shape[0]*img.shape[1])
+		};
+
+		return data;
+	}
+	   
+	/* 
+		General HDRE Functions: Write, load, parse
+	*/
 
 	/**
 	* Write and download an HDRE
@@ -663,6 +1381,159 @@
 		}\n\
 	';
 
+	HDRE.Filter_Shader_Vertex = '\
+		precision highp float;\n\
+		attribute vec2 a_coord;\n\
+		uniform float u_ioffset;\n\
+		uniform float u_blocks;\n\
+		varying vec3 v_dir;\n\
+		varying vec2 v_coord;\n\
+		void main() {\n\
+			vec2 uv = a_coord;\n\
+			uv.x /= u_blocks;\n\
+			uv.x += u_ioffset;\n\
+			v_coord = uv;\n\
+			v_dir = vec3( uv - vec2(0.5), 0.5 );\n\
+			v_dir.y = -v_dir.y;\n\
+			gl_Position = vec4(vec3(a_coord * 2.0 - 1.0, 0.5), 1.0);\n\
+		}\n\
+	';
+
+	HDRE.Filter_Shader_Fragment = '\
+		#extension GL_EXT_shader_texture_lod : enable\n\
+		precision highp float;\n\
+		\n\
+		uniform samplerCube u_color_texture;\n\
+		uniform mat3 u_cameras[6]; \n\
+		uniform mat3 u_rotation;\n\
+		uniform float u_roughness;\n\
+		uniform vec4 u_viewport; \n\
+		\n\
+		uniform float u_mipCount;\n\
+		uniform float u_emsize;\n\
+		varying vec3 v_dir;\n\
+		varying vec2 v_coord;\n\
+		const float PI = 3.1415926535897932384626433832795;\n\
+		const float size = 512.0;\n\
+		void main() {\n\
+			vec3 N = normalize( u_rotation * v_dir );\n\
+			vec4 color = vec4(0.0);\n\
+			float roughness = clamp(u_roughness, 0.0045, 0.98);\n\
+			float alphaRoughness = roughness * roughness;\n\
+			float lod = clamp(roughness * u_mipCount, 0.0, u_mipCount);\n\
+			const float step = 2.0;\n\
+			float cfs = u_emsize / pow(2.0, lod);\n\
+			\n\
+			for(float i = 0.5; i < size; i+=step)\n\
+			for(float j = 0.5; j < size; j+=step) {\n\
+				if(i > u_emsize || j > u_emsize)\n\
+				break;\n\
+				// Get pixel\n\
+				vec2 r_coord = vec2(i, j) / vec2(u_emsize, u_emsize);\n\
+				// Get 3d vector\n\
+				vec3 dir = vec3( r_coord - vec2(0.5), 0.5 );\n\
+				dir.y *= -1.0;\n\
+				\n\
+				// Use all faces\n\
+				for(int iface = 0; iface < 6; iface++) {\n\
+					\n\
+					mat3 _camera_rotation = u_cameras[iface];\n\
+					vec3 pixel_normal = normalize( _camera_rotation * dir );\n\
+					float dotProduct = max(0.0, dot(N, pixel_normal));\n\
+					float glossScale = 8.0;\n\
+					float glossFactor = (1.0 - roughness );\n\
+					float cmfs = u_emsize/pow(2.0, lod);\n\
+					float weight = pow(dotProduct, cmfs * glossFactor * glossScale );\n\
+					if(weight > 0.0 ) {\n\
+						color.rgb += textureCube(u_color_texture, pixel_normal).rgb * weight;\n\
+						color.a += weight;\n\
+					}\n\
+				}\n\
+			}\n\
+			float invWeight = 1.0/color.a;\n\
+			gl_FragColor = vec4(color.rgb * invWeight, 1.0);\n\
+		}\n\
+	';
+
+	HDRE.CopyCubemap_Shader_Fragment = '\
+		precision highp float;\n\
+		varying vec2 v_coord;\n\
+		uniform vec4 u_color;\n\
+		uniform vec4 background_color;\n\
+		uniform vec3 u_camera_position;\n\
+		uniform samplerCube u_color_texture;\n\
+		uniform mat3 u_rotation;\n\
+		uniform bool u_flip;\n\
+		void main() {\n\
+			vec2 uv = vec2( v_coord.x, 1.0 - v_coord.y );\n\
+			vec3 dir = vec3( uv - vec2(0.5), 0.5 );\n\
+			dir = u_rotation * dir;\n\
+			if(u_flip)\n\
+				dir.x *= -1.0;\n\
+			gl_FragColor = textureCube(u_color_texture, dir);\n\
+		}\n\
+	';
+
+	HDRE.Spheremap_Shader_Fragment = '\
+		precision highp float;\n\
+		varying vec2 v_coord;\n\
+		uniform vec4 u_color;\n\
+		uniform vec4 background_color;\n\
+		uniform vec3 u_camera_position;\n\
+		uniform sampler2D u_color_texture;\n\
+		uniform mat3 u_rotation;\n\
+		vec2 getSphericalUVs(vec3 dir)\n\
+		{\n\
+			dir = normalize(dir);\n\
+			dir = -dir;\n\
+			float d = sqrt(dir.x * dir.x + dir.y * dir.y);\n\
+			float r = 0.0;\n\
+			if(d > 0.0)\n\
+				r = 0.159154943 * acos(dir.z) / d;\n\
+			float u = 0.5 + dir.x * (r);\n\
+			float v = 0.5 + dir.y * (r);\n\
+			return vec2(u, v);\n\
+		}\n\
+		\n\
+		void main() {\n\
+			vec2 uv = vec2( v_coord.x, 1.0 - v_coord.y );\n\
+			vec3 dir = vec3( uv - vec2(0.5), 0.5 );\n\
+			dir = u_rotation * dir;\n\
+			dir.x = -dir.x;\n\
+			vec2 spherical_uv = getSphericalUVs( dir );\n\
+			vec4 color = texture2D(u_color_texture, spherical_uv);\n\
+			gl_FragColor = color;\n\
+		}\n\
+	';
+
+	HDRE.LatLong_Shader_Fragment = '\
+		precision highp float;\n\
+		varying vec2 v_coord;\n\
+		uniform vec4 u_color;\n\
+		uniform vec4 background_color;\n\
+		uniform vec3 u_camera_position;\n\
+		uniform sampler2D u_color_texture;\n\
+		uniform mat3 u_rotation;\n\
+		#define PI 3.1415926535897932384626433832795\n\
+		\n\
+		vec2 getPanoramicUVs(vec3 dir)\n\
+		{\n\
+			dir = normalize(dir);\n\
+			float u = 1.0 + (atan(dir.x, -dir.z) / PI);\n\
+			float v = acos(-dir.y) / PI;\n\
+			return vec2(u/2.0, v);\n\
+		}\n\
+		\n\
+		void main() {\n\
+			vec2 uv = vec2( v_coord.x, v_coord.y );\n\
+			vec3 dir = vec3( uv - vec2(0.5), 0.5 );\n\
+			dir = u_rotation * dir;\n\
+			vec2 panoramic_uv = getPanoramicUVs( dir );\n\
+			vec4 color = texture2D(u_color_texture, panoramic_uv);\n\
+			gl_FragColor = color;\n\
+		}\n\
+	';
+
 	/* 
 		Private library methods
 	*/
@@ -696,12 +1567,80 @@
 		var Uint16 = new DataView( buffer.slice( offset, offset + 2 ) ).getUint16( 0, LE );
 		return Uint16;
 	}
-
-	function parseUint8( buffer, offset ) {
 	
-		var Uint8 = new DataView( buffer.slice( offset, offset + 1 ) ).getUint8( 0 );
-		return Uint8;
-	}
+	function parseFaces( size, width, height, pixelData )
+    {
+        var faces = [],
+            it = 0,
+            F = HDRE.CUBE_MAP_NEGATIVE_Y;
+    
+        for(var i = 0; i < 6; i++)
+            faces[i] = new Float32Array(size);
+    
+        // get 3 vertical faces
+        for(var i = 0; i < height; i++)
+        {
+            var x1_n = (width * 0.25) + (i * width),
+                    x2_n = (width * 0.5) + (i * width);
+    
+            if( i === (height / 3) ) { F = HDRE.CUBE_MAP_POSITIVE_Z; it = 0; }
+            if( i === (height / 3) * 2 ) { F = HDRE.CUBE_MAP_POSITIVE_Y; it = 0; }
+    
+            var line = pixelData.subarray(x1_n * 3, x2_n * 3);
+            faces[F].set(line, it);
+            it += line.length;
+        }
+    
+        // from now get the rest from left to right
+    
+        it = 0;
+        F = HDRE.CUBE_MAP_NEGATIVE_X; // next face
+        for(var i = (height / 3); i < (height / 3) * 2; i++)
+        {
+            var x1_n = (width * 0.0) + (i * width),
+                    x2_n = (width * 0.25) + (i * width);
+    
+            var line = pixelData.subarray(x1_n * 3, x2_n * 3);
+            faces[F].set(line, it);
+            it += line.length;
+        }
+    
+        it = 0;
+        F = HDRE.CUBE_MAP_POSITIVE_X; // next face
+        for(var i = (height / 3); i < (height / 3) * 2; i++)
+        {
+                var x1_n = (width * 0.5) + (i * width),
+                        x2_n = (width * 0.75) + (i * width);
+    
+                var line = pixelData.subarray(x1_n * 3, x2_n * 3);
+                faces[F].set(line, it);
+                it += line.length;
+        }
+    
+        it = 0;
+        F = HDRE.CUBE_MAP_NEGATIVE_Z; // next face
+        for(var i = (height / 3); i < (height / 3) * 2; i++)
+        {
+                var x1_n = (width * 0.75) + (i * width),
+                        x2_n = (width * 1.0) + (i * width);
+    
+                var line = pixelData.subarray(x1_n * 3, x2_n * 3);
+                faces[F].set(line, it);
+                it += line.length;
+        }
+
+        // order faces
+        var ret = [];
+
+        ret.push( faces[HDRE.CUBE_MAP_POSITIVE_X],
+                faces[HDRE.CUBE_MAP_POSITIVE_Y],
+                faces[HDRE.CUBE_MAP_POSITIVE_Z],
+                faces[HDRE.CUBE_MAP_NEGATIVE_X],
+                faces[HDRE.CUBE_MAP_NEGATIVE_Y],
+                faces[HDRE.CUBE_MAP_NEGATIVE_Z] );
+
+        return ret;
+    }
 	
 //footer
 })( typeof(window) != "undefined" ? window : (typeof(self) != "undefined" ? self : global ) );
