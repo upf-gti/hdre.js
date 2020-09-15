@@ -90,8 +90,8 @@
 
 	HDREImage.prototype._ctor = function(h, data) {
 
-		if(!h)
-			throw("missing info");
+		//could I build hdre without header?
+		h = h || {};
 
 		// file info
 		this.version = h["version"];
@@ -120,6 +120,15 @@
 		o = o || {};
 
 		this.is_rgbe = o.rgbe !== undefined ? o.rgbe : false;
+
+		for(var k in o)
+		this[k] = o[k];
+
+		if(this.bits_channel === 32)
+			this.type = Float32Array;
+		else
+			this.type = Uint8Array;
+
 	}
 
 	HDREImage.prototype.FlipY = function() {
@@ -231,6 +240,8 @@
 	HDREBuilder.prototype._ctor = function() {
 
 		this.flip_Y_sides = false;
+		this.pool = {};
+		this.last_id = 0;
 	}
 
 	HDREBuilder.prototype.configure = function(o) {
@@ -238,16 +249,55 @@
 		o = o || {};
 	}
 
-	HDREBuilder.prototype.FromHDR = function(buffer, format, size) {
+	HDREBuilder.prototype.CreateImage = function(data, size) {
 
-		var data, result;
+		if(!data)
+		throw("[error] cannot create HDRE image");
 
-		switch (format) {
-			case HDRE.RADIANCE:
+		var texture = null;
+		var image = new HDREImage();
+
+		//create gpu texture from file
+		if(data.constructor !== GL.Texture)
+			texture = this.CreateTexture(data, size);
+		else
+			texture = data;
+				
+		image.configure({
+			version: 3.0,
+			width: texture.width,
+			height: texture.height,
+			n_channels: texture.format === GL.RGB ? 3 : 4,
+			bits_channel: texture.type === GL.FLOAT ? 32 : 8,
+			texture: texture,
+			id: this.last_id
+		})
+
+		this.pool[this.last_id++] = image;
+		console.log(this.pool);
+
+		return image;
+	}
+
+	HDREBuilder.prototype.FromFile = function(buffer, options) {
+
+		var image = HDRE.parse(buffer, options);
+		this.pool[this.last_id++] = image;
+		console.log(this.pool);
+
+		return image;
+	}
+
+	HDREBuilder.prototype.FromHDR = function(filename, buffer, size) {
+
+		var data, ext = filename.split('.').pop();
+
+		switch (ext) {
+			case "hdr":
 				data = this._parseRadiance( buffer );
 					break;
 		
-			case HDRE.EXR:
+			case "exr":
 				data = this._parseEXR( buffer );
 					break;
 
@@ -255,8 +305,19 @@
 				throw("cannot parse hdr file");
 		}
 
-		result = this.CreateTexture(data, size);
-		return result;
+		//add HDRE image to the pool
+		return this.CreateImage(data, size);
+	}
+
+	HDREBuilder.prototype.FromTexture = function(texture) {
+
+		this.Filter(texture, {
+			oncomplete: (function(result) {
+				
+				this.CreateImage(result);
+				
+			}).bind(this)
+		});
 	}
 
 	/**
@@ -298,6 +359,7 @@
 			pixel_data: pixelData
 		};
 
+		// 1 image cross cubemap
 		if(is_cubemap)
 		{
 			var square_length = pixelData.length / 12;
@@ -430,10 +492,6 @@
 		gl.bindFramebuffer( gl.FRAMEBUFFER, current_fbo ); //restore fbo
 		gl.bindTexture(cubemap_texture.texture_type, null); //disable
 
-		cubemap_texture.bind(0);
-		// gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
-		// cubemap_texture.has_mipmaps = true;
-		
 		var pixels = cubemap_texture.getCubemapPixels();
 
 		if(this.flip_Y_sides)
@@ -445,8 +503,6 @@
 
 		for(var f = 0; f < 6; ++f)
 			cubemap_texture.uploadData( pixels[f], { no_flip: false, cubemap_face: f} );
-
-		cubemap_texture.unbind();
 
 		return cubemap_texture;
 	}
@@ -474,8 +530,10 @@
 		this.LOAD_STEPS = 0;
 		this.CURRENT_STEP = 0;
 
-		//Clean previous filter data
-		texture.mipmap_data = {};
+		//Clean previous mipmap data
+		texture.mipmap_data = {
+			0: texture.getCubemapPixels()
+		};
 
 		// compute necessary steps
 		for( var i = 1; i <= mipCount; ++i )
@@ -489,8 +547,15 @@
 		{
 			this._blur( texture, mip, mipCount, shader, (function(result) {
 
-				// store
 				var pixels = result.getCubemapPixels();
+
+				//data always comes in rgba when reading pixels from textures
+				if(texture.format == GL.RGB)
+				{
+					for(var f = 0; f < 6; ++f)
+						pixels[f] = _removeAlphaChannel(pixels[f]);
+				}
+
 				texture.mipmap_data[mip] = pixels;
 
 				if(this.flip_Y_sides)
@@ -506,6 +571,10 @@
 				if(this.CURRENT_STEP == this.LOAD_STEPS)
 				{
 					texture.data = null;
+
+					// format is stored different when reading hdre files!! 
+					if(options.image_id)
+					this.pool[options.image_id].data = texture.mipmap_data;
 
 					if(options.oncomplete)
 						options.oncomplete(texture);
@@ -529,8 +598,10 @@
 		if(!data)
 		throw('no data to blur');
 		
+		// var channels = 
+
 		var options = {
-			format: gl.RGBA,
+			format: input.format, //gl.RGBA,
 			type: GL.FLOAT,
 			minFilter: gl.LINEAR_MIPMAP_LINEAR,
 			texture_type: GL.TEXTURE_CUBE_MAP
