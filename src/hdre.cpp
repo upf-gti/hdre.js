@@ -22,16 +22,13 @@ sHDRELevel HDRE::getLevel(int n)
 {
 	sHDRELevel level;
 
-	float size = std::max(8, (int)(this->width / pow(2.0, n)));
-
-	if(this->version > 2.0)
-		size = (int)(this->width / pow(2.0, n));
+	float size = (int)(this->width / pow(2.0, n));
 
 	level.width = size;
 	level.height = size; // cubemap sizes!
 	level.data = this->faces_array[n];
 	level.faces = this->getFaces(n);
-
+	
 	return level;
 }
 
@@ -68,6 +65,57 @@ HDRE* HDRE::Get(const char* filename)
 	return hdre;
 }
 
+void flipYsides(float ** data, unsigned int size, short num_channels)
+{
+	// std::cout << "Flipping Y sides" << std::endl;
+
+	size_t face_size = size * size * num_channels * 4; // Bytes!!
+	float* temp = new float[face_size];
+	memcpy(temp, data[2], face_size);
+	memcpy(data[2], data[3], face_size);
+	memcpy(data[3], temp, face_size);
+
+	delete[] temp;
+}
+
+void flipY(float** data, unsigned int size, short num_channels, bool flip_sides)
+{
+	assert(data);
+	// std::cout << "Flipping Y" << std::endl;
+
+	// bytes
+	size_t l = floor(size*0.5);
+
+	int pos = 0;
+	int lastpos = size * (size - 1) * num_channels;
+	float* temp = new float[size * num_channels];
+	size_t row_size = size * num_channels * 4;
+
+	for (unsigned int f = 0; f < 6; ++f)
+		for (size_t i = 0; i < l; ++i)
+		{
+			float* fdata = data[f];
+
+			memcpy(temp, fdata + pos, row_size);
+			memcpy(fdata + pos, fdata + lastpos, row_size);
+			memcpy(fdata + lastpos, temp, row_size);
+
+			pos += size * num_channels;
+			lastpos -= size * num_channels;
+			if (pos > lastpos)
+			{
+				pos = 0;
+				lastpos = size * (size - 1) * num_channels;
+				continue;
+			}
+		}
+
+	delete[] temp;
+
+	if (flip_sides)
+		flipYsides(data, size, num_channels);
+}
+
 bool HDRE::load(const char* filename)
 {
 	FILE *f;
@@ -82,10 +130,19 @@ bool HDRE::load(const char* filename)
 	fread(&HDREHeader, sizeof(sHDREHeader), 1, f);
 
 	if (HDREHeader.type != 3)
-		throw("ArrayType not supported. Please export in Float32Array.");
+	{
+		std::cout << "ArrayType not supported. Please export in Float32Array" << std::endl;
+		return false; 
+	}
 
 	this->header = HDREHeader;
 	this->version = HDREHeader.version;
+
+	if (this->version < 2.0)
+	{
+		std::cout << "Versions below 2.0 are no longer supported. Please, reexport the environment" << std::endl;
+		return false;
+	}
 
 	this->numChannels = HDREHeader.numChannels;
 	this->bitsPerChannel = HDREHeader.bitsPerChannel;
@@ -111,11 +168,7 @@ bool HDRE::load(const char* filename)
 	{
 		int mip_level = i + 1;
 		dataSize += w * w * N_FACES * HDREHeader.numChannels;
-
-		w = std::max(8, (int)(width / pow(2.0, mip_level)));
-
-		if (this->version > 2.0)
-			w = (int)(width / pow(2.0, mip_level));
+		w = (int)(width / pow(2.0, mip_level));
 	}
 
 	this->data = new float[dataSize];
@@ -163,11 +216,20 @@ bool HDRE::load(const char* filename)
 		// update level offset
 		mapOffset += mapSize;
 
-		// reassign width for next level
-		w = std::max(8, (int)(width / pow(2.0, mip_level)));
+		// refactored code for writing HDRE 
+		// removing Y flipping for webGl at Firefox
+		if (this->version < 3.0)
+		{
+			flipY(this->pixels[i], w, this->numChannels, true);
+		}
+		else
+		{
+			if (i != 0) // original is already flipped
+				flipY(this->pixels[i], w, this->numChannels, false);
+		}
 
-		if (this->version > 2.0)
-			w = (int)(width / pow(2.0, mip_level));
+		// reassign width for next level
+		w = (int)(width / pow(2.0, mip_level));
 	}
 
 	std::cout << std::endl << " + '" << filename << "' (v" << this->version << ") loaded successfully" << std::endl;
