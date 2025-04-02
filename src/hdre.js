@@ -16,10 +16,10 @@
 	var FLO2BYTE = 4;
 	var BYTE2BITS = 8;
 
-	var U_BYTE		= 01;
-	var HALF_FLOAT	= 02;
-	var FLOAT		= 03;
-	var U_BYTE_RGBE	= 04;
+	var U_BYTE		= 1;
+	var HALF_FLOAT	= 2;
+	var FLOAT		= 3;
+	var U_BYTE_RGBE	= 4;
 
 	var ARRAY_TYPES = {
 		1: Uint8Array,
@@ -137,7 +137,7 @@
 
 	HDREImage.prototype.toTexture = function() {
 		
-		if(!window.GL)
+		if(!window.GL && window.gl)
 			throw("this function requires to use litegl.js");
 
 		var _envs = this.data;
@@ -149,18 +149,19 @@
 		var data = _envs[0].data;
 		var w = this.width;
 
+		var gl = window.gl;
+
 		if(this.type === Uint16Array) // HALF FLOAT
-			tex_type = GL.HALF_FLOAT_OES;
+			tex_type = gl.webgl_version === 2 ? gl.HALF_FLOAT : GL.HALF_FLOAT_OES;
 		else if(this.type === Uint8Array) 
 			tex_type = GL.UNSIGNED_BYTE;
-
 		
 		var flip_Y_sides = false;
 
 		// "true" for using old environments
         // (not standard flipY)
 		if(this.version < 3.0)
-		flip_Y_sides = true;
+			flip_Y_sides = true;
 
 		if(flip_Y_sides)
 		{
